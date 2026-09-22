@@ -9,6 +9,8 @@
     "build": "vite build",
     "start": "node server/index.js",
     "seed": "node server/seed.js",
+    "seed:dev": "node server/seed-dev.js",
+    "create-admin": "node server/create-admin.js",
     "test": "node --test",
     "lint": "eslint ."
   },

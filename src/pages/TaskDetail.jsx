@@ -29,6 +29,7 @@ export default function TaskDetail({ user }) {
   const [task, setTask] = useState(null);
   const [loading, setLoading] = useState(true);
   const [applyComment, setApplyComment] = useState('');
+  const [selectedRole, setSelectedRole] = useState('');
   const [submissionNotes, setSubmissionNotes] = useState('');
   const [applying, setApplying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -38,6 +39,16 @@ export default function TaskDetail({ user }) {
   const [customPoints, setCustomPoints] = useState('');
   const [completionReason, setCompletionReason] = useState('');
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
+
+  const parsedRoles = React.useMemo(() => {
+    if (!task?.roles_needed) return [];
+    try {
+      const parsed = typeof task.roles_needed === 'string' ? JSON.parse(task.roles_needed) : task.roles_needed;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [task?.roles_needed]);
 
   const loadTask = async () => {
     try {
@@ -60,14 +71,22 @@ export default function TaskDetail({ user }) {
   // Student applies
   const handleApply = async (e) => {
     e.preventDefault();
+    if (parsedRoles.length > 0 && !selectedRole) {
+      toast.error('Пожалуйста, выберите позицию/роль на мероприятии');
+      return;
+    }
     setApplying(true);
     try {
       await api(`/tasks/${id}/apply`, {
         method: 'POST',
-        body: JSON.stringify({ comment: applyComment })
+        body: JSON.stringify({
+          comment: applyComment,
+          role_name: selectedRole || null
+        })
       });
       toast.success('Заявка на участие успешно отправлена!');
       setApplyComment('');
+      setSelectedRole('');
       loadTask();
     } catch (err) {
       toast.error(err.message);
@@ -134,7 +153,7 @@ export default function TaskDetail({ user }) {
           reason: completionReason
         })
       });
-      toast.success(`Выполнение подтверждено! Волонтёру начислено ${customPoints} баллов.`);
+      toast.success(`Выполнение подтверждено! Медиаволонтёру начислено ${customPoints} баллов.`);
       setCompleteModalUser(null);
       loadTask();
     } catch (err) {
@@ -228,11 +247,24 @@ export default function TaskDetail({ user }) {
               <div className="meta-box">
                 <Users size={18} className="meta-icon" />
                 <div>
-                  <span className="meta-label">Требуется волонтёров</span>
+                  <span className="meta-label">Требуется медиаволонтёров</span>
                   <b>{task.required_volunteers} чел.</b>
                 </div>
               </div>
             </div>
+
+            {parsedRoles.length > 0 && (
+              <div className="detail-extra-block">
+                <h4>Требуемые позиции:</h4>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                  {parsedRoles.map((r, idx) => (
+                    <span key={idx} className="badge badge-primary" style={{ fontSize: '12px', padding: '4px 10px' }}>
+                      {r.name} — {r.count} чел.
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {task.skills && (
               <div className="detail-extra-block">
@@ -280,16 +312,40 @@ export default function TaskDetail({ user }) {
                     <form onSubmit={handleApply}>
                       <h3>Хотите участвовать в этом задании?</h3>
                       <p className="muted">
-                        Опишите свой опыт или оставьте комментарий куратору (например, какая техника у вас есть).
+                        Выберите желаемую позицию и при необходимости оставьте комментарий куратору (например, о технике или опыте).
                       </p>
-                      <textarea
-                        rows="3"
-                        placeholder="Ваш комментарий или пожелания (необязательно)…"
-                        value={applyComment}
-                        onChange={(e) => setApplyComment(e.target.value)}
-                      />
+
+                      {parsedRoles.length > 0 && (
+                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                          <label style={{ fontSize: '13px', fontWeight: 600 }}>
+                            Желаемая позиция / роль *
+                          </label>
+                          <select
+                            value={selectedRole}
+                            onChange={(e) => setSelectedRole(e.target.value)}
+                            required
+                          >
+                            <option value="">-- Выберите роль на мероприятии --</option>
+                            {parsedRoles.map((r, i) => (
+                              <option key={i} value={r.name}>
+                                {r.name} ({r.count} чел.)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="form-group">
+                        <textarea
+                          rows="3"
+                          placeholder="Ваш комментарий или пожелания (необязательно)…"
+                          value={applyComment}
+                          onChange={(e) => setApplyComment(e.target.value)}
+                        />
+                      </div>
+
                       <button type="submit" className="btn primary" disabled={applying}>
-                        <Send size={16} /> {applying ? 'Отправляем…' : 'Подать заявку волонтёра'}
+                        <Send size={16} /> {applying ? 'Отправляем…' : 'Подать заявку медиаволонтёра'}
                       </button>
                     </form>
                   ) : (
@@ -331,7 +387,7 @@ export default function TaskDetail({ user }) {
                   <div className="part-header">
                     <CheckCircle2 size={24} className="part-icon success" />
                     <div>
-                      <h3>Поздравляем! Вы выбраны волонтёром!</h3>
+                      <h3>Поздравляем! Вы выбраны медиаволонтёром!</h3>
                       <p>
                         Вы утверждены для участия в задании. Пожалуйста, будьте на связи с куратором.
                         После завершения работы отправьте ссылку на материалы или краткий отчёт.
@@ -421,7 +477,7 @@ export default function TaskDetail({ user }) {
             <div className="panel applicants-panel">
               <div className="section-head">
                 <div>
-                  <h3>Заявки волонтёров</h3>
+                  <h3>Заявки медиаволонтёров</h3>
                   <p className="muted">Управление составом команды</p>
                 </div>
                 <span className="section-count">{task.applicants?.length || 0}</span>
@@ -434,10 +490,33 @@ export default function TaskDetail({ user }) {
                       <div className="applicant-top">
                         <Avatar firstName={app.first_name} lastName={app.last_name} size="normal" />
                         <div className="applicant-header-text">
-                          <b>{app.first_name} {app.last_name}</b>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <b>{app.first_name} {app.last_name}</b>
+                            {app.order_num && (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: 'var(--surface2)',
+                                  border: '1px solid var(--border)',
+                                  color: 'var(--text-secondary)'
+                                }}
+                              >
+                                №{app.order_num} · {app.created_at ? formatDateTime(app.created_at).slice(-5) : ''}
+                              </span>
+                            )}
+                          </div>
                           <small className="muted">
                             {app.group_name} {app.year ? `· ${app.year} курс` : ''} · Баллов: {app.student_points}
                           </small>
+                          {app.role_name && (
+                            <div style={{ marginTop: '3px' }}>
+                              <span className="badge badge-primary" style={{ fontSize: '11px', padding: '2px 8px' }}>
+                                Позиция: {app.role_name}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <StatusBadge status={app.status} />
                       </div>
@@ -456,7 +535,7 @@ export default function TaskDetail({ user }) {
 
                       {app.submission_notes && (
                         <div className="applicant-submission">
-                          <b>Отчёт волонтёра:</b>
+                          <b>Отчёт медиаволонтёра:</b>
                           <p>{app.submission_notes}</p>
                         </div>
                       )}
@@ -469,7 +548,7 @@ export default function TaskDetail({ user }) {
                               className="btn tiny primary"
                               onClick={() => handleUpdateStatus(app.id, 'SELECTED')}
                             >
-                              Выбрать волонтёром
+                              Выбрать медиаволонтёром
                             </button>
                             <button
                               className="btn tiny ghost"
@@ -517,7 +596,7 @@ export default function TaskDetail({ user }) {
           ) : (
             <div className="panel selected-team-panel">
               <div className="section-head">
-                <h3>Команда волонтёров</h3>
+                <h3>Команда медиаволонтёров</h3>
                 <span className="muted">{task.selected_volunteers?.length || 0} участников</span>
               </div>
               {task.selected_volunteers && task.selected_volunteers.length > 0 ? (
@@ -527,13 +606,13 @@ export default function TaskDetail({ user }) {
                       <Avatar firstName={vol.first_name} lastName={vol.last_name} size="small" />
                       <div>
                         <b>{vol.first_name} {vol.last_name}</b>
-                        <small className="muted">{vol.group_name || 'Волонтёр'}</small>
+                        <small className="muted">{vol.group_name || 'Медиаволонтёр'}</small>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <Empty title="Команда формируется" text="Отобранные волонтёры будут показаны здесь." />
+                <Empty title="Команда формируется" text="Отобранные медиаволонтёры будут показаны здесь." />
               )}
             </div>
           )}
@@ -549,7 +628,7 @@ export default function TaskDetail({ user }) {
         >
           <div className="modal-form">
             <p className="muted">
-              Вы подтверждаете завершение работы студентом{' '}
+              Вы подтверждаете завершение работы медиаволонтёром{' '}
               <b>
                 {completeModalUser.first_name} {completeModalUser.last_name}
               </b>{' '}
@@ -557,10 +636,11 @@ export default function TaskDetail({ user }) {
             </p>
 
             <div className="form-group">
-              <label>Количество начисляемых баллов</label>
+              <label>Количество начисляемых баллов (до 100)</label>
               <input
                 type="number"
                 min="0"
+                max="100"
                 value={customPoints}
                 onChange={(e) => setCustomPoints(e.target.value)}
               />

@@ -24,6 +24,13 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
   });
   const [savingPass, setSavingPass] = useState(false);
 
+  // Login change form
+  const [loginForm, setLoginForm] = useState({
+    newLogin: '',
+    currentPassword: ''
+  });
+  const [savingLogin, setSavingLogin] = useState(false);
+
   const handleSelectTheme = async (tId) => {
     setTheme(tId);
     try {
@@ -51,6 +58,31 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
       toast.error(err.message);
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleChangeLogin = async (e) => {
+    e.preventDefault();
+    if (!loginForm.newLogin.trim()) {
+      toast.error('Укажите новый логин');
+      return;
+    }
+    setSavingLogin(true);
+    try {
+      const res = await api('/auth/change-login', {
+        method: 'POST',
+        body: JSON.stringify({
+          newLogin: loginForm.newLogin.trim(),
+          currentPassword: loginForm.currentPassword
+        })
+      });
+      setUser(res.user);
+      toast.success(res.message || 'Логин успешно изменён!');
+      setLoginForm({ newLogin: '', currentPassword: '' });
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingLogin(false);
     }
   };
 
@@ -86,7 +118,7 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
   return (
     <Page
       title="Настройки аккаунта"
-      subtitle="Персонализация интерфейса, темы оформления, данные профиля волонтёра и безопасность."
+      subtitle="Персонализация интерфейса, темы оформления, данные профиля и безопасность."
     >
       <div className="settings-container">
         {/* THEMES */}
@@ -135,7 +167,7 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
           <div className="settings-card-header">
             <div className="settings-icon-wrap"><User size={20} /></div>
             <div>
-              <h3>Профиль волонтёра</h3>
+              <h3>{user.role === 'STUDENT' ? 'Профиль медиаволонтёра' : 'Данные профиля'}</h3>
               <p className="muted">
                 Информация видна кураторам медиацентра при рассмотрении заявок на задания.
               </p>
@@ -159,7 +191,7 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
                 <input
                   type="text"
                   disabled
-                  value={`${user.group_name || '—'} · ${user.role === 'ADMIN' ? 'Администратор' : user.role === 'STAFF' ? 'Сотрудник' : 'Волонтёр'}`}
+                  value={`${user.group_name || '—'} · ${user.role === 'ADMIN' ? 'Администратор' : user.role === 'STAFF' ? 'Сотрудник' : 'Медиаволонтёр'}`}
                   className="disabled-input"
                 />
               </div>
@@ -167,7 +199,7 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
 
             <div className="form-grid-2">
               <div className="form-group">
-                <label>Контактный телефон</label>
+                <label>Телефон для связи</label>
                 <input
                   type="tel"
                   placeholder="+7 (999) 000-00-00"
@@ -177,10 +209,10 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
               </div>
 
               <div className="form-group">
-                <label>Контакт в мессенджере MAX</label>
+                <label>Контакт в Макс (аккаунт)</label>
                 <input
                   type="text"
-                  placeholder="@username или телефон в MAX"
+                  placeholder="никнейм или номер в Макс"
                   value={profileForm.max_contact}
                   onChange={(e) => setProfileForm({ ...profileForm, max_contact: e.target.value })}
                 />
@@ -188,10 +220,10 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
             </div>
 
             <div className="form-group">
-              <label>Ваши медиа-навыки и специализация (через запятую)</label>
+              <label>Мои навыки и специализация (через запятую)</label>
               <input
                 type="text"
-                placeholder="Фотография, Видеосъёмка, Монтаж Premiere, SMM, Дизайн Figma…"
+                placeholder="Фотография, Видеосъёмка, Монтаж Premiere, СММ, Дизайн Figma…"
                 value={profileForm.skills}
                 onChange={(e) => setProfileForm({ ...profileForm, skills: e.target.value })}
               />
@@ -261,6 +293,49 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
 
             <button type="submit" className="btn ghost" disabled={savingPass}>
               <Lock size={16} /> {savingPass ? 'Меняем пароль…' : 'Сменить пароль'}
+            </button>
+          </form>
+        </div>
+
+        {/* CHANGE LOGIN */}
+        <div className="panel settings-card">
+          <div className="settings-card-header">
+            <div className="settings-icon-wrap"><User size={20} /></div>
+            <div>
+              <h3>Смена логина учётной записи</h3>
+              <p className="muted">
+                Текущий логин: <b>@{user.login}</b>. Для смены укажите новый уникальный логин и подтвердите текущим паролем.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleChangeLogin} className="settings-form">
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label>Новый логин *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="ivan_petrov"
+                  value={loginForm.newLogin}
+                  onChange={(e) => setLoginForm({ ...loginForm, newLogin: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, '') })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Текущий пароль для подтверждения *</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Ваш текущий пароль"
+                  value={loginForm.currentPassword}
+                  onChange={(e) => setLoginForm({ ...loginForm, currentPassword: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <button type="submit" className="btn ghost" disabled={savingLogin}>
+              <User size={16} /> {savingLogin ? 'Сохраняем…' : 'Обновить логин'}
             </button>
           </form>
         </div>

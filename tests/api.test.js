@@ -307,9 +307,9 @@ describe('Media Center API Tests', () => {
     assert.ok(Array.isArray(trackData.departments));
     assert.equal(trackData.departments.length, 6);
     assert.deepEqual(trackData.departments, [
-      'Учебное отделение «МосСовет»',
+      'Учебное отделение «Моссовет»',
       'Учебное отделение «Техно»',
-      'Учебное отделение «ДатаХаб»',
+      'Учебное отделение «Датахаб»',
       'Учебное отделение «АртТех»',
       'Учебное отделение «Кибер»',
       'Учебное отделение «Диджитал»'
@@ -333,8 +333,8 @@ describe('Media Center API Tests', () => {
     // 1d. Check SMM and Content track canonical names
     const smmTrackRes = await fetch(baseUrl + '/api/public/recruitment/track/smm');
     const smmData = await smmTrackRes.json();
-    assert.equal(smmData.track.name, 'SMM');
-    assert.equal(smmData.track.title, 'Тестовое задание — SMM');
+    assert.equal(smmData.track.name, 'СММ');
+    assert.equal(smmData.track.title, 'Тестовое задание — СММ');
     assert.equal(smmData.track.materials_url, null);
 
     const contentTrackRes = await fetch(baseUrl + '/api/public/recruitment/track/content');
@@ -428,7 +428,7 @@ describe('Media Center API Tests', () => {
     });
     assert.equal(invalidPhoneRes.status, 400);
 
-    // 4c. Photo validation: Photo requires strictly 10 JPEG files
+    // 4c. Photo validation: Photo requires either 10 JPEG files or valid Yandex Disk folder
     const badPhotoRes = await fetch(baseUrl + '/api/public/recruitment/apply/photo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -438,13 +438,29 @@ describe('Media Center API Tests', () => {
         group_name: 'ФТ-11',
         phone: '+7 999 111-22-33',
         max_contact: '@ivan_photo',
-        submission_url: 'https://disk.yandex.ru/d/test',
+        submission_url: 'https://not-yandex.com/invalid-link',
         consent: true
       })
     });
     assert.equal(badPhotoRes.status, 400);
-    const badPhotoData = await badPhotoRes.json();
-    assert.equal(badPhotoData.error, 'Для направления Фотография требуется прикрепить ровно 10 фотографий в формате JPEG');
+
+    // 4c-2. Successful Photo submission via Yandex Disk link
+    const yandexPhotoRes = await fetch(baseUrl + '/api/public/recruitment/apply/photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        full_name: 'Иван Дисков',
+        department: trackData.departments[0],
+        group_name: 'ФТ-11',
+        phone: '+7 999 111-22-33',
+        phone_is_max: 'true',
+        submission_url: 'https://disk.yandex.ru/d/test-folder',
+        consent: true
+      })
+    });
+    assert.equal(yandexPhotoRes.status, 201);
+    const yandexPhotoData = await yandexPhotoRes.json();
+    assert.match(yandexPhotoData.public_id, /^MC-P-\d{4}$/);
 
     // 4d. Successful Photo submission with 10 JPEG files
     const photoFormData = new FormData();
@@ -454,8 +470,9 @@ describe('Media Center API Tests', () => {
     photoFormData.append('phone', '+7 (999) 777-88-99');
     photoFormData.append('phone_is_max', 'true');
     photoFormData.append('consent', 'true');
+    const jpegHeader = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
     for (let i = 1; i <= 10; i++) {
-      const blob = new Blob(['photo content ' + i], { type: 'image/jpeg' });
+      const blob = new Blob([jpegHeader, 'photo content ' + i], { type: 'image/jpeg' });
       photoFormData.append('files', blob, `shot_${i}.jpg`);
     }
     const goodPhotoRes = await fetch(baseUrl + '/api/public/recruitment/apply/photo', {

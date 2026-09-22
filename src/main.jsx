@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { KeyRound, AlertCircle } from 'lucide-react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { api } from './api.js';
 import { ToastProvider } from './context/ToastContext.jsx';
 import Shell from './components/Shell.jsx';
 import Login from './pages/Login.jsx';
+import FirstLogin from './pages/FirstLogin.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Tasks from './pages/Tasks.jsx';
 import TaskDetail from './pages/TaskDetail.jsx';
@@ -24,89 +24,6 @@ import './styles.css';
 function isRecruitmentSubdomain() {
   const host = window.location.hostname.toLowerCase();
   return ['photo.', 'video.', 'montage.', 'design.', 'smm.', 'content.'].some((prefix) => host.startsWith(prefix));
-}
-
-function FirstLoginModal({ user, onPasswordChanged }) {
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      setError('Новый пароль должен содержать минимум 6 символов');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError('Пароли не совпадают');
-      return;
-    }
-
-    setBusy(true);
-    setError('');
-    try {
-      const res = await api('/auth/first-login-password-change', {
-        method: 'POST',
-        body: JSON.stringify({ newPassword })
-      });
-      onPasswordChanged(res.user);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="privacy-modal-backdrop" style={{ zIndex: 1000 }}>
-      <div className="privacy-modal-content" style={{ maxWidth: '440px' }}>
-        <div className="privacy-modal-header">
-          <KeyRound size={22} className="shield-icon" style={{ color: 'var(--accent)' }} />
-          <h3>Смена временного пароля</h3>
-        </div>
-        <form onSubmit={handleSubmit} style={{ padding: '20px 24px' }}>
-          <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '16px' }}>
-            Вы вошли по временному паролю, выданному куратором или администратором. В целях безопасности установите свой постоянный пароль для доступа в систему «МедиаКод».
-          </p>
-
-          {error && (
-            <div className="form-error-banner" style={{ marginBottom: '14px' }}>
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <div className="form-group">
-            <label>Новый пароль (минимум 6 символов) *</label>
-            <input
-              type="password"
-              required
-              autoFocus
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Введите новый пароль"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Повторите новый пароль *</label>
-            <input
-              type="password"
-              required
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Повторите пароль"
-            />
-          </div>
-
-          <button type="submit" className="btn primary wide" disabled={busy} style={{ marginTop: '10px' }}>
-            {busy ? 'Сохранение пароля…' : 'Установить пароль и продолжить'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
 }
 
 function App() {
@@ -152,6 +69,8 @@ function App() {
     }
   }, [theme]);
 
+  const location = useLocation();
+
   if (loading) {
     return (
       <div className="splash">
@@ -162,87 +81,86 @@ function App() {
     );
   }
 
-  const pathname = window.location.pathname;
-  const isPublicRecruitmentPath = pathname.startsWith('/join') || (isRecruitmentSubdomain() && pathname === '/');
-
-  if (isPublicRecruitmentPath && !pathname.startsWith('/api')) {
+  // Guest users routing (no auth)
+  if (!user) {
     return (
       <Routes>
         <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
         <Route path="/join" element={<PublicRecruitment />} />
-        <Route path="*" element={<PublicRecruitment />} />
+        <Route
+          path="*"
+          element={isRecruitmentSubdomain() ? <PublicRecruitment /> : <Login onLogin={setUser} />}
+        />
       </Routes>
     );
   }
 
-  if (!user) {
-    return <Login onLogin={setUser} />;
+  // Mandatory first login account setup (full screen)
+  if (user.must_change_password) {
+    return (
+      <FirstLogin
+        user={user}
+        onPasswordChanged={(updatedUser) => setUser(updatedUser)}
+      />
+    );
   }
 
   const isStaffOrAdmin = user.role === 'STAFF' || user.role === 'ADMIN';
   const isAdmin = user.role === 'ADMIN';
 
   return (
-    <>
-      {user.must_change_password && (
-        <FirstLoginModal
-          user={user}
-          onPasswordChanged={(updatedUser) => setUser(updatedUser)}
+    <Shell user={user} setUser={setUser} theme={theme} setTheme={setTheme}>
+      <Routes>
+        <Route path="/" element={<Dashboard user={user} />} />
+        <Route path="/dashboard" element={<Dashboard user={user} />} />
+
+        {/* Public recruitment preview route */}
+        <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
+        <Route path="/join" element={<PublicRecruitment />} />
+
+        {/* Recruitment Applications Review (Staff & Admin) */}
+        <Route
+          path="/recruitment"
+          element={isStaffOrAdmin ? <RecruitmentReview currentUser={user} /> : <Navigate to="/dashboard" replace />}
         />
-      )}
-      <Shell user={user} setUser={setUser} theme={theme} setTheme={setTheme}>
-        <Routes>
-          <Route path="/" element={<Dashboard user={user} />} />
-          <Route path="/dashboard" element={<Dashboard user={user} />} />
 
-          {/* Public recruitment preview route */}
-          <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
-          <Route path="/join" element={<PublicRecruitment />} />
+        {/* Tasks */}
+        <Route path="/tasks" element={<Tasks user={user} />} />
+        <Route
+          path="/tasks/new"
+          element={isStaffOrAdmin ? <TaskForm user={user} /> : <Navigate to="/tasks" replace />}
+        />
+        <Route path="/tasks/:id" element={<TaskDetail user={user} />} />
+        <Route
+          path="/tasks/:id/edit"
+          element={isStaffOrAdmin ? <TaskForm user={user} /> : <Navigate to="/tasks" replace />}
+        />
 
-          {/* Recruitment Applications Review (Staff & Admin) */}
-          <Route
-            path="/recruitment"
-            element={isStaffOrAdmin ? <RecruitmentReview currentUser={user} /> : <Navigate to="/dashboard" replace />}
-          />
+        {/* Volunteers & Community */}
+        <Route path="/students" element={<Students user={user} />} />
+        <Route path="/record-book" element={<RecordBook user={user} />} />
+        <Route path="/leaderboard" element={<Leaderboard user={user} />} />
+        <Route path="/notifications" element={<Notifications user={user} />} />
 
-          {/* Tasks */}
-          <Route path="/tasks" element={<Tasks user={user} />} />
-          <Route
-            path="/tasks/new"
-            element={isStaffOrAdmin ? <TaskForm user={user} /> : <Navigate to="/tasks" replace />}
-          />
-          <Route path="/tasks/:id" element={<TaskDetail user={user} />} />
-          <Route
-            path="/tasks/:id/edit"
-            element={isStaffOrAdmin ? <TaskForm user={user} /> : <Navigate to="/tasks" replace />}
-          />
+        {/* Admin only */}
+        <Route
+          path="/admin/users"
+          element={isAdmin ? <AdminUsers currentUser={user} /> : <Navigate to="/dashboard" replace />}
+        />
+        <Route
+          path="/admin/audit"
+          element={isAdmin ? <AdminAudit currentUser={user} /> : <Navigate to="/dashboard" replace />}
+        />
 
-          {/* Volunteers & Community */}
-          <Route path="/students" element={<Students user={user} />} />
-          <Route path="/record-book" element={<RecordBook user={user} />} />
-          <Route path="/leaderboard" element={<Leaderboard user={user} />} />
-          <Route path="/notifications" element={<Notifications user={user} />} />
+        {/* Settings */}
+        <Route
+          path="/settings"
+          element={<SettingsPage theme={theme} setTheme={setTheme} user={user} setUser={setUser} />}
+        />
 
-          {/* Admin only */}
-          <Route
-            path="/admin/users"
-            element={isAdmin ? <AdminUsers currentUser={user} /> : <Navigate to="/dashboard" replace />}
-          />
-          <Route
-            path="/admin/audit"
-            element={isAdmin ? <AdminAudit currentUser={user} /> : <Navigate to="/dashboard" replace />}
-          />
-
-          {/* Settings */}
-          <Route
-            path="/settings"
-            element={<SettingsPage theme={theme} setTheme={setTheme} user={user} setUser={setUser} />}
-          />
-
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </Shell>
-    </>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Shell>
   );
 }
 

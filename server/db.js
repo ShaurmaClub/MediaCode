@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
   middle_name TEXT,
   email TEXT,
   group_name TEXT,
+  department TEXT,
   year INTEGER,
   bio TEXT,
   phone TEXT,
@@ -193,6 +194,7 @@ function ensureColumn(table, colName, colDef) {
 
 ensureColumn('users', 'skills', 'TEXT');
 ensureColumn('users', 'middle_name', 'TEXT');
+ensureColumn('users', 'department', 'TEXT');
 ensureColumn('users', 'phone', 'TEXT');
 ensureColumn('users', 'max_contact', 'TEXT');
 ensureColumn('users', 'must_change_password', 'INTEGER DEFAULT 0');
@@ -209,6 +211,13 @@ ensureColumn('applications', 'updated_at', 'TEXT');
 ensureColumn('recruitment_applications', 'student_user_id', 'INTEGER');
 ensureColumn('recruitment_applications', 'submission_text', 'TEXT');
 ensureColumn('recruitment_tracks', 'submission_mode', 'TEXT DEFAULT "DEFAULT"');
+ensureColumn('tasks', 'roles_needed', 'TEXT');
+ensureColumn('tasks', 'location_type', 'TEXT');
+ensureColumn('tasks', 'custom_category', 'TEXT');
+ensureColumn('applications', 'role_name', 'TEXT');
+ensureColumn('points', 'reversal_of_id', 'INTEGER');
+ensureColumn('points', 'reversal_reason', 'TEXT');
+ensureColumn('points', 'is_reversed', 'INTEGER DEFAULT 0');
 
 export function seed() {
   const usersCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
@@ -270,12 +279,19 @@ export function seed() {
 
   // Update existing applications with old demo departments to new official names
   db.exec(`
-    UPDATE recruitment_applications SET department = 'Учебное отделение «МосСовет»' WHERE department LIKE '%МосСовет%' OR department = 'Отделение аудиовизуальных технологий';
-    UPDATE recruitment_applications SET department = 'Учебное отделение «ДатаХаб»' WHERE department LIKE '%Виджев%' OR department LIKE '%БТХаб%' OR department = 'Отделение дизайна и рекламы';
+    UPDATE recruitment_applications SET department = 'Учебное отделение «Моссовет»' WHERE department LIKE '%МосСовет%' OR department LIKE '%Моссовет%' OR department = 'Отделение аудиовизуальных технологий';
+    UPDATE recruitment_applications SET department = 'Учебное отделение «Датахаб»' WHERE department LIKE '%Виджев%' OR department LIKE '%БТХаб%' OR department LIKE '%Дата%' OR department LIKE '%Data%';
     UPDATE recruitment_applications SET department = 'Учебное отделение «Техно»' WHERE department LIKE '%Техно%' OR department = 'Отделение информационных технологий';
     UPDATE recruitment_applications SET department = 'Учебное отделение «АртТех»' WHERE department LIKE '%Артех%' OR department LIKE '%АртТех%';
     UPDATE recruitment_applications SET department = 'Учебное отделение «Кибер»' WHERE department LIKE '%Кибер%';
     UPDATE recruitment_applications SET department = 'Учебное отделение «Диджитал»' WHERE department LIKE '%Диджитал%';
+
+    UPDATE users SET department = 'Учебное отделение «Датахаб»' WHERE department LIKE '%Виджев%' OR department LIKE '%БТХаб%' OR department LIKE '%Дата%' OR department LIKE '%Data%';
+    UPDATE users SET department = 'Учебное отделение «Моссовет»' WHERE department LIKE '%МосСовет%' OR department LIKE '%Моссовет%';
+    UPDATE users SET department = 'Учебное отделение «Техно»' WHERE department LIKE '%Техно%';
+    UPDATE users SET department = 'Учебное отделение «АртТех»' WHERE department LIKE '%Артех%' OR department LIKE '%АртТех%';
+    UPDATE users SET department = 'Учебное отделение «Кибер»' WHERE department LIKE '%Кибер%';
+    UPDATE users SET department = 'Учебное отделение «Диджитал»' WHERE department LIKE '%Диджитал%';
   `);
 
   const trackRows = db.prepare('SELECT id, slug FROM recruitment_tracks').all();
@@ -296,7 +312,7 @@ export function seed() {
       'MC-V-0001',
       videoTrackId,
       'Кирилл Романов',
-      'Учебное отделение «МосСовет»',
+      'Учебное отделение «Моссовет»',
       'МТ-11',
       '+79161112233',
       '+79161112233',
@@ -310,7 +326,7 @@ export function seed() {
       'MC-P-0002',
       photoTrackId,
       'Елизавета Васильева',
-      'Учебное отделение «ДатаХаб»',
+      'Учебное отделение «Датахаб»',
       'ГД-21',
       '+79032223344',
       '+79032223344',

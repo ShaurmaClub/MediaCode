@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Award, BookOpen, Filter, Search, CheckCircle2, Calendar } from 'lucide-react';
+import { Award, BookOpen, Filter, Search, CheckCircle2, Calendar, AlertTriangle } from 'lucide-react';
 import { api } from '../api.js';
 import { Page, Loader, Empty, PointRow } from '../components/UI.jsx';
+import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 
 const CATEGORIES = [
   { id: 'ALL', label: 'Все категории' },
-  { id: 'COMPLETION', label: 'Задания (COMPLETION)' },
-  { id: 'EVENT', label: 'События (EVENT)' },
-  { id: 'PHOTO_VIDEO', label: 'Фото/Видео (PHOTO_VIDEO)' },
-  { id: 'SMM', label: 'SMM и Дизайн (SMM)' },
-  { id: 'BONUS', label: 'Бонусы (BONUS)' },
-  { id: 'OTHER', label: 'Прочее (OTHER)' }
+  { id: 'COMPLETION', label: 'Задания' },
+  { id: 'EVENT', label: 'События' },
+  { id: 'PHOTO_VIDEO', label: 'Фото и видео' },
+  { id: 'SMM', label: 'СММ и Дизайн' },
+  { id: 'BONUS', label: 'Бонусы' },
+  { id: 'CORRECTION', label: 'Корректировки' },
+  { id: 'OTHER', label: 'Прочее' }
 ];
 
 export default function RecordBook({ user }) {
@@ -24,6 +26,13 @@ export default function RecordBook({ user }) {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const toast = useToast();
+
+  // Reversal modal state
+  const [reversingPoint, setReversingPoint] = useState(null);
+  const [reversalReason, setReversalReason] = useState('');
+  const [busyReverse, setBusyReverse] = useState(false);
+
+  const isStaffOrAdmin = user?.role === 'STAFF' || user?.role === 'ADMIN';
 
   const loadRecordBook = async () => {
     try {
@@ -42,7 +51,32 @@ export default function RecordBook({ user }) {
     loadRecordBook();
   }, [targetStudentId]);
 
-  if (loading || !data) return <Loader text="Загружаем зачётную книжку волонтёра…" />;
+  const handleConfirmReverse = async (e) => {
+    e.preventDefault();
+    if (!reversingPoint) return;
+    if (!reversalReason.trim()) {
+      toast.error('Укажите причину отмены начисления');
+      return;
+    }
+
+    setBusyReverse(true);
+    try {
+      await api(`/points/${reversingPoint.id}/reverse`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reversalReason.trim() })
+      });
+      toast.success(`Начисление #${reversingPoint.id} (${reversingPoint.amount} баллов) успешно отменено`);
+      setReversingPoint(null);
+      setReversalReason('');
+      loadRecordBook();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusyReverse(false);
+    }
+  };
+
+  if (loading || !data) return <Loader text="Загружаем зачётную книжку медиаволонтёра…" />;
 
   const filteredPoints = (data.points || []).filter((p) => {
     const matchesCategory = categoryFilter === 'ALL' || p.category === categoryFilter;
@@ -54,22 +88,22 @@ export default function RecordBook({ user }) {
     return matchesCategory && matchesSearch;
   });
 
-  const completionCount = (data.points || []).filter((p) => p.category === 'COMPLETION').length;
-  const bonusCount = (data.points || []).filter((p) => p.category === 'BONUS').length;
+  const completionCount = (data.points || []).filter((p) => p.category === 'COMPLETION' && p.is_reversed !== 1).length;
+  const bonusCount = (data.points || []).filter((p) => p.category === 'BONUS' && p.is_reversed !== 1).length;
 
   return (
     <Page
       title={
         targetStudentId
           ? `Зачётная книжка: ${data.user.first_name} ${data.user.last_name}`
-          : 'Электронная зачётная книжка волонтёра'
+          : 'Электронная зачётная книжка медиаволонтёра'
       }
       subtitle="Официальный журнал начислений баллов медиацентра. Каждая запись защищена и неизменяема."
     >
       {/* Hero Record Book Card */}
       <div className="record-hero">
         <div className="record-hero-main">
-          <span className="record-hero-eyebrow">ИТОГОВЫЙ БАЛАНС ВОЛОНТЁРА</span>
+          <span className="record-hero-eyebrow">ИТОГОВЫЙ БАЛАНС МЕДИАВОЛОНТЁРА</span>
           <strong className="record-hero-points">{data.user.totalPoints}</strong>
           <p className="record-hero-desc">
             Владелец книжки: <b>{data.user.first_name} {data.user.last_name}</b>{' '}
@@ -130,7 +164,17 @@ export default function RecordBook({ user }) {
 
         <div className="points-list detailed">
           {filteredPoints.length > 0 ? (
-            filteredPoints.map((p) => <PointRow key={p.id} point={p} detailed />)
+            filteredPoints.map((p) => (
+              <PointRow
+                key={p.id}
+                point={p}
+                detailed
+                onReverse={isStaffOrAdmin ? (point) => {
+                  setReversingPoint(point);
+                  setReversalReason('');
+                } : null}
+              />
+            ))
           ) : (
             <Empty
               title="Записи не найдены"
@@ -139,6 +183,57 @@ export default function RecordBook({ user }) {
           )}
         </div>
       </div>
+
+      {/* Point Reversal Modal for Staff / Admin */}
+      {reversingPoint && (
+        <Modal
+          title="Отмена начисления баллов"
+          onClose={() => setReversingPoint(null)}
+        >
+          <form onSubmit={handleConfirmReverse} style={{ padding: '4px 0' }}>
+            <div style={{ display: 'flex', gap: '12px', background: 'var(--surface2)', padding: '14px', borderRadius: 'var(--radius-sm)', marginBottom: '16px', border: '1px solid var(--border)' }}>
+              <AlertTriangle size={22} className="text-warning" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong>Внимание: отмена записи #{reversingPoint.id}</strong>
+                <p className="muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>
+                  Будет произведена отмена начисления <b>+{reversingPoint.amount} баллов</b> за: «{reversingPoint.reason}».
+                  В зачётной книжке будет создана корректирующая запись со списанием баллов.
+                </p>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Укажите причину отмены *</label>
+              <textarea
+                rows="3"
+                required
+                autoFocus
+                placeholder="Например: ошибочное дублирование начисления куратором"
+                value={reversalReason}
+                onChange={(e) => setReversalReason(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setReversingPoint(null)}
+                disabled={busyReverse}
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                className="btn danger"
+                disabled={busyReverse}
+              >
+                {busyReverse ? 'Отменяем…' : 'Подтвердить отмену начисления'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </Page>
   );
 }

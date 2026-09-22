@@ -149,7 +149,7 @@ export default function RecruitmentReview({ currentUser }) {
   return (
     <Page
       title="Заявки на отбор"
-      subtitle="Проверка тестовых заданий будущих волонтёров медиацентра, связь с кандидатами и зачисление в команду."
+      subtitle="Проверка тестовых заданий будущих медиаволонтёров медиацентра, связь с кандидатами и зачисление в команду."
       eyebrow="РЕКРУТИНГ"
       actions={
         <div className="recruitment-head-stats">
@@ -197,7 +197,7 @@ export default function RecruitmentReview({ currentUser }) {
               <option value="VIDEO">Видеограф</option>
               <option value="MONTAGE">Монтажёр</option>
               <option value="DESIGN">Графический дизайнер</option>
-              <option value="SMM">SMM</option>
+              <option value="SMM">СММ</option>
               <option value="CONTENT">Ведущий / корреспондент</option>
             </select>
           </div>
@@ -223,7 +223,7 @@ export default function RecruitmentReview({ currentUser }) {
         <div className="success-banner-card">
           <CheckCircle size={24} className="text-success" />
           <div className="banner-text">
-            <h4>Аккаунт волонтёра создан: {createdUserNotice.user?.name}</h4>
+            <h4>Аккаунт медиаволонтёра создан: {createdUserNotice.user?.name}</h4>
             <p>
               Логин для входа: <code>{createdUserNotice.user?.login}</code> · Стартовый пароль:{' '}
               <code>{createdUserNotice.temporaryPassword}</code> · Начислено +{createdUserNotice.user?.bonusPoints} приветственных баллов.
@@ -300,7 +300,7 @@ export default function RecruitmentReview({ currentUser }) {
                             <Phone size={12} /> {app.phone}
                           </span>
                           <span className="contact-line" style={{ fontSize: '11px' }}>
-                            <MessageSquare size={12} /> MAX: {
+                            <MessageSquare size={12} /> Макс: {
                               (app.max_contact && (app.max_contact === app.phone || app.max_contact.replace(/\D/g, '').endsWith((app.phone || '').replace(/\D/g, '').slice(-10))))
                                 ? 'используется этот номер'
                                 : 'не подтверждён'
@@ -402,18 +402,58 @@ export default function RecruitmentReview({ currentUser }) {
             <Loader text="Загрузка материалов заявки…" />
           ) : (
             <div className="app-detail-modal">
+              {/* Prominent Track Banner */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(79, 70, 229, 0.1))',
+                  border: '1px solid rgba(124, 58, 237, 0.3)',
+                  marginBottom: '16px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '10px',
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    {(() => {
+                      const Icon = TRACK_ICONS[appDetails.application.track_type] || Camera;
+                      return <Icon size={20} />;
+                    })()}
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', fontWeight: 700, display: 'block' }}>
+                      Направление отбора
+                    </span>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
+                      {appDetails.application.track_name}
+                    </h3>
+                  </div>
+                </div>
+                <span className={`badge ${STATUS_LABELS[appDetails.application.status]?.cls || 'status-default'}`} style={{ fontSize: '12px', padding: '6px 12px' }}>
+                  {STATUS_LABELS[appDetails.application.status]?.label || appDetails.application.status}
+                </span>
+              </div>
+
               {/* Header Info */}
               <div className="app-detail-head">
                 <div>
                   <h3>{appDetails.application.full_name}</h3>
                   <p className="muted">
-                    Направление: <strong>{appDetails.application.track_name}</strong> · Отделение: {appDetails.application.department} · Группа: {appDetails.application.group_name}
+                    Отделение: <strong>{appDetails.application.department}</strong> · Учебная группа: <strong>{appDetails.application.group_name}</strong>
                   </p>
-                </div>
-                <div>
-                  <span className={`badge ${STATUS_LABELS[appDetails.application.status]?.cls || 'status-default'}`}>
-                    {STATUS_LABELS[appDetails.application.status]?.label || appDetails.application.status}
-                  </span>
                 </div>
               </div>
 
@@ -426,7 +466,7 @@ export default function RecruitmentReview({ currentUser }) {
                   </a>
                 </div>
                 <div className="contact-box-item">
-                  <span className="muted">Мессенджер MAX:</span>
+                  <span className="muted">Мессенджер Макс:</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span className="contact-value">
                       <MessageSquare size={14} /> {
@@ -435,7 +475,7 @@ export default function RecruitmentReview({ currentUser }) {
                           appDetails.application.max_contact.replace(/\D/g, '').endsWith((appDetails.application.phone || '').replace(/\D/g, '').slice(-10))
                         ))
                           ? 'Используется номер телефона'
-                          : 'Номер не подтверждён в MAX'
+                          : 'Номер не подтверждён в Макс'
                       }
                     </span>
                   </div>
@@ -474,7 +514,7 @@ export default function RecruitmentReview({ currentUser }) {
                   <div className="submission-text-box" style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                       <FileText size={16} style={{ color: 'var(--accent)' }} />
-                      <strong style={{ fontSize: '13px' }}>Текст тестового задания (SMM / копирайтинг / концепт):</strong>
+                      <strong style={{ fontSize: '13px' }}>Текст тестового задания (СММ / копирайтинг / концепт):</strong>
                     </div>
                     <div
                       style={{
@@ -583,7 +623,7 @@ export default function RecruitmentReview({ currentUser }) {
                       setApprovingApp(appDetails.application);
                     }}
                   >
-                    <UserCheck size={16} /> Одобрить и создать профиль волонтёра
+                    <UserCheck size={16} /> Одобрить и создать профиль медиаволонтёра
                   </button>
                 ) : (
                   <span className="approved-badge-lg">
@@ -606,7 +646,7 @@ export default function RecruitmentReview({ currentUser }) {
         >
           <form onSubmit={handleApproveAndCreate} className="modal-form">
             <p className="modal-intro">
-              После подтверждения для кандидата будет автоматически создан аккаунт волонтёра со специализацией{' '}
+              После подтверждения для кандидата будет автоматически создан аккаунт медиаволонтёра со специализацией{' '}
               <strong>«{approvingApp.track_name}»</strong> и начислено стартовое поощрение (+10 баллов).
             </p>
 
@@ -625,7 +665,7 @@ export default function RecruitmentReview({ currentUser }) {
               <input
                 type="text"
                 disabled
-                value={`Телефон: ${approvingApp.phone} · MAX: ${approvingApp.max_contact}`}
+                value={`Телефон: ${approvingApp.phone} · Макс: ${approvingApp.max_contact}`}
                 className="disabled-input"
               />
             </div>
@@ -639,7 +679,7 @@ export default function RecruitmentReview({ currentUser }) {
                 onChange={(e) => setCustomPassword(e.target.value)}
                 placeholder="Demo123!"
               />
-              <small className="muted">При первом входе в систему волонтёру будет предложено сменить этот временный пароль на свой постоянный.</small>
+              <small className="muted">При первом входе в систему медиаволонтёру будет предложено сменить этот временный пароль на свой постоянный.</small>
             </div>
 
             <div className="modal-actions">

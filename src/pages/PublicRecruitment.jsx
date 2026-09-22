@@ -71,6 +71,7 @@ export default function PublicRecruitment() {
   const [submissionText, setSubmissionText] = useState('');
   const [comment, setComment] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [photoMode, setPhotoMode] = useState('files'); // 'files' | 'link'
   const [consent, setConsent] = useState(false);
 
   // Load track info when effectiveSlug is defined
@@ -235,19 +236,27 @@ export default function PublicRecruitment() {
 
     // 6. Track-specific submission validation
     if (effectiveSlug === 'photo') {
-      if (selectedFiles.length !== 10) {
-        setErrorMessage('Для направления Фотография требуется прикрепить ровно 10 фотографий в формате JPEG');
-        return;
-      }
-      const allJpegs = selectedFiles.every((f) => {
-        const name = (f.name || '').toLowerCase();
-        const isExt = name.endsWith('.jpg') || name.endsWith('.jpeg');
-        const isMime = f.type === 'image/jpeg' || f.type === 'image/pjpeg';
-        return isExt || isMime;
-      });
-      if (!allJpegs) {
-        setErrorMessage('Для направления Фотография требуется прикрепить ровно 10 фотографий в формате JPEG');
-        return;
+      const isYandex = submissionUrl.trim().startsWith('https://disk.yandex.ru/') || submissionUrl.trim().startsWith('https://yadi.sk/');
+      if (photoMode === 'link' || (!selectedFiles.length && submissionUrl.trim())) {
+        if (!isYandex) {
+          setErrorMessage('Для направления Фотография укажите корректную ссылку на папку в Яндекс Диске (https://disk.yandex.ru/... или https://yadi.sk/...)');
+          return;
+        }
+      } else {
+        if (selectedFiles.length !== 10) {
+          setErrorMessage('Для направления Фотография прикрепите ровно 10 фотографий JPEG или переключитесь на отправку ссылки на Яндекс Диск');
+          return;
+        }
+        const allJpegs = selectedFiles.every((f) => {
+          const name = (f.name || '').toLowerCase();
+          const isExt = name.endsWith('.jpg') || name.endsWith('.jpeg');
+          const isMime = f.type === 'image/jpeg' || f.type === 'image/pjpeg';
+          return isExt || isMime;
+        });
+        if (!allJpegs) {
+          setErrorMessage('Все 10 файлов должны быть фотографиями в формате JPEG (.jpg / .jpeg)');
+          return;
+        }
       }
     } else if (effectiveSlug === 'smm') {
       if (!submissionText.trim() && !submissionUrl.trim()) {
@@ -345,8 +354,12 @@ export default function PublicRecruitment() {
       {/* Top Header */}
       <header className="public-header">
         <div className="public-header-inner">
-          <Link to="/" className="public-brand">
-            <img src="/mediacode-logo.png" alt="МедиаКод" className="brand-img-lg" />
+          <Link to="/" className="public-brand" title="КАИТ20 · МедиаКод">
+            <div className="public-brand-dual">
+              <img src="/brand/kait20.png" alt="КАИТ20" className="public-brand-kait" />
+              <div className="public-brand-divider" />
+              <img src="/brand/mediacode.png" alt="МедиаКод" className="public-brand-mediacode" />
+            </div>
             <span className="public-brand-tag">Отбор медиаволонтёров</span>
           </Link>
 
@@ -438,7 +451,7 @@ export default function PublicRecruitment() {
               </div>
               <h1>Заявка отправлена</h1>
               <p className="confirmation-sub">
-                Мы проверим материалы и свяжемся с вами в мессенджере MAX или по телефону.
+                Мы проверим материалы и свяжемся с вами в мессенджере Макс или по телефону.
               </p>
             </div>
 
@@ -465,10 +478,10 @@ export default function PublicRecruitment() {
                   <strong>1. Изучение материалов.</strong> Куратор направления внимательно отсмотрит ваше тестовое задание в течение нескольких дней.
                 </li>
                 <li>
-                  <strong>2. Обратная связь.</strong> Наш куратор напишет вам в MAX или позвонит по номеру <code>{submittedData.phone}</code>.
+                  <strong>2. Обратная связь.</strong> Наш куратор напишет вам в Макс или позвонит по номеру <code>{submittedData.phone}</code>.
                 </li>
                 <li>
-                  <strong>3. Приглашение в команду.</strong> После успешного отбора вы получите доступ к системе «МедиаКод» и первые приветственные баллы волонтёра!
+                  <strong>3. Приглашение в команду.</strong> После успешного отбора вы получите доступ к системе «МедиаКод» и первые приветственные баллы медиаволонтёра!
                 </li>
               </ul>
             </div>
@@ -547,7 +560,7 @@ export default function PublicRecruitment() {
                     <ul className="perks-list">
                       <li>✦ Реальная практика на съёмках и событиях колледжа</li>
                       <li>✦ Доступ к студийному свету, технике и монтажным станциям</li>
-                      <li>✦ Накопление баллов активности, электронная зачётка волонтёра</li>
+                      <li>✦ Накопление баллов активности, электронная зачётка медиаволонтёра</li>
                       <li>✦ Пополнение личного портфолио сильными проектами</li>
                     </ul>
                   </div>
@@ -612,7 +625,7 @@ export default function PublicRecruitment() {
                           id="groupName"
                           type="text"
                           required
-                          placeholder="например, ИС-21"
+                          placeholder="ИБС 111"
                           value={groupName}
                           onChange={(e) => setGroupName(e.target.value)}
                         />
@@ -630,10 +643,13 @@ export default function PublicRecruitment() {
                         value={phone}
                         onChange={handlePhoneChange}
                       />
+                      <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        Номер телефона будет использоваться сотрудниками медиацентра для оперативной связи во время мероприятий
+                      </small>
                       <label
                         className="checkbox-label"
                         style={{
-                          marginTop: '10px',
+                          marginTop: '8px',
                           fontSize: '12.5px',
                           cursor: 'pointer',
                           display: 'flex',
@@ -647,17 +663,8 @@ export default function PublicRecruitment() {
                           checked={phoneIsMax}
                           onChange={(e) => setPhoneIsMax(e.target.checked)}
                         />
-                        <span>Этот номер телефона используется в MAX</span>
+                        <span>Этот номер телефона используется в Макс</span>
                       </label>
-                      {phoneIsMax ? (
-                        <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '11.5px', color: 'var(--accent)' }}>
-                          ✓ Номер {phone || 'телефона'} будет использоваться кураторами для оперативной связи в мессенджере MAX
-                        </small>
-                      ) : (
-                        <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '11.5px' }}>
-                          Если у вас есть аккаунт в мессенджере MAX на этом номере, отметьте галочку для связи.
-                        </small>
-                      )}
                     </div>
 
                     {/* Portfolio URL: strictly Yandex Disk */}
@@ -677,19 +684,64 @@ export default function PublicRecruitment() {
                       <div className="materials-box-header">
                         <label className="submission-label" style={{ margin: 0, fontWeight: 700 }}>
                           {effectiveSlug === 'photo'
-                            ? 'Материалы задания: ровно 10 фотографий JPEG *'
+                            ? 'Материалы задания: 10 фотографий JPEG *'
                             : effectiveSlug === 'smm'
                             ? 'Ответ на тестовое задание *'
                             : 'Материалы выполненного задания *'}
                         </label>
                         <span className="muted" style={{ fontSize: '12px' }}>
                           {effectiveSlug === 'photo'
-                            ? 'Ровно 10 файлов JPEG'
+                            ? (photoMode === 'files' ? 'Ровно 10 файлов JPEG' : 'Ссылка на Яндекс Диск')
                             : effectiveSlug === 'smm'
                             ? 'Текст задания или Яндекс Диск'
                             : 'Файл или Яндекс Диск'}
                         </span>
                       </div>
+
+                      {/* Photo mode toggle */}
+                      {effectiveSlug === 'photo' && (
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', background: 'var(--surface2)', padding: '4px', borderRadius: 'var(--radius-sm)' }}>
+                          <button
+                            type="button"
+                            className={`btn sm ${photoMode === 'files' ? 'primary' : 'ghost'}`}
+                            style={{ flex: 1 }}
+                            onClick={() => setPhotoMode('files')}
+                          >
+                            Загрузить 10 JPEG на сайт
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn sm ${photoMode === 'link' ? 'primary' : 'ghost'}`}
+                            style={{ flex: 1 }}
+                            onClick={() => setPhotoMode('link')}
+                          >
+                            Ссылка на Яндекс Диск
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Photo: Yandex Disk mode */}
+                      {effectiveSlug === 'photo' && photoMode === 'link' && (
+                        <div className="form-group" style={{ marginTop: '14px' }}>
+                          <label htmlFor="submissionUrl" style={{ fontSize: '13px', fontWeight: 600 }}>
+                            Ссылка на папку с 10 фото на Яндекс Диске *
+                          </label>
+                          <div className="url-input-wrap">
+                            <LinkIcon size={16} className="url-icon" />
+                            <input
+                              id="submissionUrl"
+                              type="url"
+                              required
+                              placeholder="https://disk.yandex.ru/d/..."
+                              value={submissionUrl}
+                              onChange={(e) => setSubmissionUrl(e.target.value)}
+                            />
+                          </div>
+                          <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '11.5px', lineHeight: 1.4 }}>
+                            Загрузите ровно 10 отобранных кадров в папку на Яндекс Диске и вставьте публичную ссылку с открытым доступом.
+                          </small>
+                        </div>
+                      )}
 
                       {/* SMM: Primary Large Textarea */}
                       {effectiveSlug === 'smm' && (
@@ -732,8 +784,8 @@ export default function PublicRecruitment() {
                         </div>
                       )}
 
-                      {/* File Upload Dropzone (NOT primary for SMM) */}
-                      {effectiveSlug !== 'smm' && (
+                      {/* File Upload Dropzone (NOT primary for SMM; conditional for Photo) */}
+                      {effectiveSlug !== 'smm' && (effectiveSlug !== 'photo' || photoMode === 'files') && (
                         <div className="upload-block" style={{ marginTop: '14px' }}>
                           <div
                             className="multi-file-dropzone"
@@ -935,7 +987,7 @@ export default function PublicRecruitment() {
               <p>
                 <strong>1. Цель обработки данных</strong>
                 <br />
-                Предоставленные персональные данные (ФИО, учебная группа, контактный телефон, аккаунт в мессенджере MAX, ссылки на материалы и портфолио) обрабатываются исключительно в целях организации конкурсного отбора волонтёров в студенческий медиацентр «МедиаКод».
+                Предоставленные персональные данные (ФИО, учебная группа, контактный телефон, аккаунт в мессенджере Макс, ссылки на материалы и портфолио) обрабатываются исключительно в целях организации конкурсного отбора медиаволонтёров в студенческий медиацентр «МедиаКод».
               </p>
               <p>
                 <strong>2. Конфиденциальность и безопасность</strong>
@@ -945,7 +997,7 @@ export default function PublicRecruitment() {
               <p>
                 <strong>3. Связь с кандидатом</strong>
                 <br />
-                Номер телефона и контакт MAX используются куратором направления для информирования о результатах рассмотрения тестового задания и координации дальнейших встреч.
+                Номер телефона и контакт Макс используются куратором направления для информирования о результатах рассмотрения тестового задания и координации дальнейших встреч.
               </p>
             </div>
             <div className="privacy-modal-footer">

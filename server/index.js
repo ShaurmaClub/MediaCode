@@ -5,16 +5,33 @@ import SQLiteSessionStore from './session-store.js';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import db, { seed, DEPARTMENTS } from './db.js';
 import storageService, { uploadMiddleware } from './storage.js';
 import { validateMaxInitData, sendMaxNotification, getMaxConfig } from './max.js';
+import { MAX_POINTS_PER_TRANSACTION, EVENT_CATEGORIES } from './config/eventCategories.js';
 
-seed();
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Production security check: SESSION_SECRET must be explicitly set and secure
+if (isProduction) {
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.includes('change-me') || process.env.SESSION_SECRET.includes('secret-key')) {
+    console.error('CRITICAL ERROR: В режиме production переменная окружения SESSION_SECRET обязательна и должна содержать надёжный уникальный секретный ключ.');
+    process.exit(1);
+  }
+} else {
+  // In development, run seed
+  seed();
+}
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Trust reverse proxy (nginx / traefik / caddy)
+app.set('trust proxy', 1);
 
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -24,10 +41,9 @@ app.use(helmet({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
-const isProduction = process.env.NODE_ENV === 'production';
 app.use(session({
   store: new SQLiteSessionStore(),
-  secret: process.env.SESSION_SECRET || 'media-center-secret-key-2026',
+  secret: process.env.SESSION_SECRET || 'dev-only-secret-do-not-use-in-production-2026',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -98,6 +114,11 @@ export function audit(actorId, action, entityType, entityId = null, metadata = {
     delete cleanMeta.password;
     delete cleanMeta.password_hash;
     delete cleanMeta.newPassword;
+    delete cleanMeta.currentPassword;
+    delete cleanMeta.temporaryPassword;
+    delete cleanMeta.token;
+    delete cleanMeta.SESSION_SECRET;
+    delete cleanMeta.MAX_BOT_TOKEN;
     db.prepare(`
       INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, metadata)
       VALUES (?, ?, ?, ?, ?)
@@ -105,6 +126,25 @@ export function audit(actorId, action, entityType, entityId = null, metadata = {
   } catch (err) {
     console.error('Audit logging error:', err.message);
   }
+}
+
+// Helper: Generate temporary random password
+export function generateTemporaryPassword() {
+  const lettersUpper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lettersLower = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%';
+  const all = lettersUpper + lettersLower + digits + symbols;
+
+  let pwd = '';
+  pwd += lettersUpper[crypto.randomInt(0, lettersUpper.length)];
+  pwd += lettersLower[crypto.randomInt(0, lettersLower.length)];
+  pwd += digits[crypto.randomInt(0, digits.length)];
+  pwd += symbols[crypto.randomInt(0, symbols.length)];
+  for (let i = 0; i < 6; i++) {
+    pwd += all[crypto.randomInt(0, all.length)];
+  }
+  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
 }
 
 // Helper: Human readable audit description
@@ -122,6 +162,8 @@ export function getHumanReadableAudit(action, actorName, entityType, entityId, m
       return `Неудачная попытка входа с логином «${meta.login || 'неизвестно'}»`;
     case 'LOGOUT':
       return `${actor} вышел из системы`;
+    case 'LOGIN_CHANGED':
+      return `${actor} изменил логин на @${meta.new_login || ''}`;
     case 'TASK_CREATED':
       return `${actor} создал мероприятие «${meta.title || ''}»`;
     case 'TASK_UPDATED':
@@ -142,6 +184,8 @@ export function getHumanReadableAudit(action, actorName, entityType, entityId, m
       return `${actor} подтвердил выполнение мероприятия и начислил ${meta.pointsAwarded || 0} баллов`;
     case 'POINTS_MANUALLY_ISSUED':
       return `${actor} начислил ${meta.amount > 0 ? '+' : ''}${meta.amount} баллов в Record Book: ${meta.reason || ''}`;
+    case 'POINTS_REVERSED':
+      return `${actor} отменил начисление #${meta.originalPointId || ''} (${meta.reversalAmount || 0} баллов): ${meta.reason || ''}`;
     case 'USER_CREATED':
       return `${actor} зарегистрировал нового пользователя @${meta.login || ''} (${meta.role || ''})`;
     case 'USER_UPDATED':
@@ -157,7 +201,7 @@ export function getHumanReadableAudit(action, actorName, entityType, entityId, m
     case 'RECRUITMENT_APPLICATION_STATUS':
       return `${actor} изменил статус заявки № ${meta.public_id || ''} на «${meta.newStatus || ''}»`;
     case 'STUDENT_ACCOUNT_CREATED_FROM_RECRUITMENT':
-      return `${actor} одобрил заявку № ${meta.publicId || ''} и создал аккаунт волонтёра @${meta.login || ''}`;
+      return `${actor} одобрил заявку № ${meta.publicId || ''} и создал аккаунт медиаволонтёра @${meta.login || ''}`;
     case 'RECRUITMENT_TRACK_UPDATED':
       return `${actor} обновил настройки направления отбора «${meta.track || ''}»`;
     default:
@@ -277,23 +321,81 @@ app.post('/api/auth/change-password', auth, authLimiter, (req, res) => {
 });
 
 app.post('/api/auth/first-login-password-change', auth, authLimiter, (req, res) => {
-  const { newPassword } = req.body || {};
+  const currentUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!currentUser || !currentUser.must_change_password) {
+    return res.status(403).json({ error: 'Смена пароля без ввода старого пароля разрешена только при первом входе' });
+  }
+
+  const { newLogin, newPassword } = req.body || {};
   if (!newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: 'Новый пароль должен содержать не менее 6 символов' });
   }
 
+  let finalLogin = currentUser.login;
+  if (newLogin && String(newLogin).trim().length > 0) {
+    const cleanLogin = String(newLogin).trim().toLowerCase();
+    if (!/^[a-z0-9_.-]{3,30}$/.test(cleanLogin)) {
+      return res.status(400).json({ error: 'Логин должен содержать от 3 до 30 символов (латинские буквы, цифры, дефис, точка)' });
+    }
+    const existing = db.prepare('SELECT id FROM users WHERE login = ? AND id != ?').get(cleanLogin, req.user.id);
+    if (existing) {
+      return res.status(400).json({ error: 'Этот логин уже занят другим пользователем' });
+    }
+    finalLogin = cleanLogin;
+  }
+
   const newHash = bcrypt.hashSync(String(newPassword), 10);
-  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(newHash, req.user.id);
-  audit(req.user.id, 'PASSWORD_CHANGED', 'USER', req.user.id, { reason: 'FIRST_LOGIN_CHANGE' });
+  db.prepare('UPDATE users SET login = ?, password_hash = ?, must_change_password = 0 WHERE id = ?')
+    .run(finalLogin, newHash, req.user.id);
+
+  audit(req.user.id, 'PASSWORD_CHANGED', 'USER', req.user.id, { reason: 'FIRST_LOGIN_SETUP' });
+  if (finalLogin !== currentUser.login) {
+    audit(req.user.id, 'LOGIN_CHANGED', 'USER', req.user.id, { old_login: currentUser.login, new_login: finalLogin });
+  }
 
   const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  res.json({ ok: true, user: safeUser(updated), message: 'Пароль успешно установлен' });
+  req.session.user.login = updated.login;
+  res.json({ ok: true, user: safeUser(updated), message: 'Учётная запись успешно настроена' });
+});
+
+// User changes login in account settings (requires current password)
+app.post('/api/auth/change-login', auth, authLimiter, (req, res) => {
+  const { currentPassword, newLogin } = req.body || {};
+  if (!currentPassword || !newLogin) {
+    return res.status(400).json({ error: 'Укажите текущий пароль и новый логин' });
+  }
+
+  const cleanLogin = String(newLogin).trim().toLowerCase();
+  if (!/^[a-z0-9_.-]{3,30}$/.test(cleanLogin)) {
+    return res.status(400).json({ error: 'Логин должен быть от 3 до 30 символов (латинские буквы, цифры, дефис, точка)' });
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
+    return res.status(400).json({ error: 'Текущий пароль указан неверно' });
+  }
+
+  if (cleanLogin === user.login) {
+    return res.status(400).json({ error: 'Новый логин совпадает с текущим' });
+  }
+
+  const existing = db.prepare('SELECT id FROM users WHERE login = ? AND id != ?').get(cleanLogin, req.user.id);
+  if (existing) {
+    return res.status(400).json({ error: 'Этот логин уже занят другим пользователем' });
+  }
+
+  db.prepare('UPDATE users SET login = ? WHERE id = ?').run(cleanLogin, req.user.id);
+  audit(req.user.id, 'LOGIN_CHANGED', 'USER', req.user.id, { old_login: user.login, new_login: cleanLogin });
+
+  req.session.user.login = cleanLogin;
+  const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({ ok: true, user: safeUser(updated), message: 'Логин успешно изменён' });
 });
 
 app.post('/api/auth/request-password-reset', authLimiter, (req, res) => {
   const { loginOrContact } = req.body || {};
   if (!loginOrContact || !String(loginOrContact).trim()) {
-    return res.status(400).json({ error: 'Укажите логин, номер телефона или контакт в MAX' });
+    return res.status(400).json({ error: 'Укажите логин, номер телефона или контакт в Макс' });
   }
 
   const term = String(loginOrContact).trim();
@@ -318,7 +420,7 @@ app.post('/api/auth/request-password-reset', authLimiter, (req, res) => {
 
   res.json({
     ok: true,
-    message: 'Запрос на восстановление доступа отправлен администраторам медиацентра. Мы свяжемся с вами в мессенджере MAX или по телефону.'
+    message: 'Запрос на восстановление доступа отправлен администраторам медиацентра. Мы свяжемся с вами в мессенджере Макс или по телефону.'
   });
 });
 
@@ -331,7 +433,7 @@ app.post('/api/auth/max-mini-app', (req, res) => {
   const { initData } = req.body || {};
   const validation = validateMaxInitData(initData);
   if (!validation.valid || !validation.user) {
-    return res.status(400).json({ error: validation.error || 'Недействительные данные авторизации MAX' });
+    return res.status(400).json({ error: validation.error || 'Недействительные данные авторизации Макс' });
   }
 
   const maxUser = validation.user;
@@ -344,7 +446,7 @@ app.post('/api/auth/max-mini-app', (req, res) => {
 
   if (!user) {
     return res.status(404).json({
-      error: 'Учётная запись медиацентра не привязана к этому профилю MAX. Пожалуйста, войдите по логину и паролю и привяжите MAX в настройках.',
+      error: 'Учётная запись медиацентра не привязана к этому профилю Макс. Пожалуйста, войдите по логину и паролю и привяжите Макс в настройках.',
       maxUser: {
         id: maxUser.id,
         username: maxUser.username,
@@ -389,7 +491,7 @@ app.post('/api/user/link-max', auth, (req, res) => {
   }
 
   if (!userIdToLink && !usernameToLink) {
-    return res.status(400).json({ error: 'Укажите данные аккаунта MAX' });
+    return res.status(400).json({ error: 'Укажите данные аккаунта Макс' });
   }
 
   db.prepare(`
@@ -403,7 +505,7 @@ app.post('/api/user/link-max', auth, (req, res) => {
 
   const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   audit(req.user.id, 'PROFILE_UPDATED', 'MAX_LINK', req.user.id, { maxUserId: userIdToLink, maxUsername: usernameToLink });
-  res.json({ ok: true, user: safeUser(updatedUser), message: 'Аккаунт MAX успешно привязан' });
+  res.json({ ok: true, user: safeUser(updatedUser), message: 'Аккаунт Макс успешно привязан' });
 });
 
 // ==========================================
@@ -660,7 +762,7 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
     }
 
     const isPhoneMax = phone_is_max === 'true' || phone_is_max === true || phone_is_max === '1';
-    const finalMaxContact = isPhoneMax ? normalizedPhone : 'Номер не подтверждён как используемый в MAX';
+    const finalMaxContact = isPhoneMax ? normalizedPhone : 'Номер не подтверждён как используемый в Макс';
 
     const consentAccepted = consent === 'true' || consent === true || consent === '1';
     if (!consentAccepted) {
@@ -673,20 +775,49 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
     const trackType = (track.type || '').toUpperCase();
 
     if (trackSlug === 'photo' || trackType === 'PHOTO') {
-      // Photo track requires strictly 10 files, all in JPEG format
-      const isTenFiles = uploadedFiles.length === 10;
-      const allJpegs = isTenFiles && uploadedFiles.every(f => {
-        const name = (f.originalname || '').toLowerCase();
-        const isExtJpeg = name.endsWith('.jpg') || name.endsWith('.jpeg');
-        const isMimeJpeg = f.mimetype === 'image/jpeg' || f.mimetype === 'image/pjpeg';
-        return isExtJpeg || isMimeJpeg;
-      });
+      const hasFiles = uploadedFiles.length > 0;
+      const hasYandexLink = Boolean(submission_url && String(submission_url).trim().length > 0);
 
-      if (!isTenFiles || !allJpegs) {
+      if (!hasFiles && !hasYandexLink) {
         cleanupFiles();
         return res.status(400).json({
-          error: 'Для направления Фотография требуется прикрепить ровно 10 фотографий в формате JPEG'
+          error: 'Для направления «Фотография» прикрепите ровно 10 фотографий в формате JPEG либо укажите ссылку на папку в Яндекс Диске'
         });
+      }
+
+      if (hasFiles) {
+        const isTenFiles = uploadedFiles.length === 10;
+        const allJpegs = isTenFiles && uploadedFiles.every(f => {
+          const name = (f.originalname || '').toLowerCase();
+          const isExtJpeg = name.endsWith('.jpg') || name.endsWith('.jpeg');
+          const isMimeJpeg = f.mimetype === 'image/jpeg' || f.mimetype === 'image/pjpeg';
+          if (!isExtJpeg || !isMimeJpeg) return false;
+          try {
+            const buf = Buffer.alloc(3);
+            const fd = fs.openSync(f.path, 'r');
+            fs.readSync(fd, buf, 0, 3, 0);
+            fs.closeSync(fd);
+            return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+          } catch {
+            return false;
+          }
+        });
+
+        if (!isTenFiles || !allJpegs) {
+          cleanupFiles();
+          return res.status(400).json({
+            error: 'Для направления Фотография требуется прикрепить ровно 10 фотографий в формате JPEG'
+          });
+        }
+      } else if (hasYandexLink) {
+        const trimmed = String(submission_url).trim();
+        const isYandex = /^https?:\/\/(disk\.)?yandex\.(ru|com|by|kz)\//i.test(trimmed) || trimmed.startsWith('https://yadi.sk/');
+        if (!isYandex) {
+          cleanupFiles();
+          return res.status(400).json({
+            error: 'Укажите корректную ссылку на Яндекс Диск (https://disk.yandex.ru/...)'
+          });
+        }
       }
     } else if (trackSlug === 'smm' || trackType === 'SMM') {
       // SMM track requires response text or document link
@@ -964,14 +1095,14 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
   if (appRecord.student_user_id) {
     const existingUser = db.prepare('SELECT * FROM users WHERE id = ?').get(appRecord.student_user_id);
     return res.status(400).json({
-      error: 'Аккаунт волонтёра уже был создан ранее',
+      error: 'Аккаунт медиаволонтёра уже был создан ранее',
       user: safeUser(existingUser)
     });
   }
 
   // Parse name
   const nameParts = appRecord.full_name.trim().split(/\s+/);
-  let firstName = nameParts[0] || 'Волонтёр';
+  let firstName = nameParts[0] || 'Медиаволонтёр';
   let lastName = '';
   let middleName = '';
 
@@ -1002,7 +1133,7 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
     PHOTO: 'Фотография, Свет, Lightroom',
     VIDEO: 'Видеосъёмка, Видеомонтаж, Premiere Pro',
     DESIGN: 'Графический дизайн, Figma, Типографика',
-    SMM: 'SMM, Копирайтинг, Контент'
+    SMM: 'СММ, Копирайтинг, Контент'
   };
   const skill = trackSkillsMap[appRecord.track_type] || appRecord.track_name;
 
@@ -1021,7 +1152,7 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
       middleName,
       `${login}@college.local`,
       appRecord.group_name,
-      `Волонтёр медиацентра (направление «${appRecord.track_name}»). Принят по заявке ${appRecord.public_id}.`,
+      `Медиаволонтёр медиацентра (направление «${appRecord.track_name}»). Принят по заявке ${appRecord.public_id}.`,
       skill,
       appRecord.phone,
       appRecord.max_contact
@@ -1064,7 +1195,7 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
 
   res.status(201).json({
     ok: true,
-    message: 'Кандидат успешно принят, создан аккаунт волонтёра!',
+    message: 'Кандидат успешно принят, создан аккаунт медиаволонтёра!',
     user: safeUser(createdUser),
     login,
     initialPassword
@@ -1195,15 +1326,15 @@ app.get('/api/tasks/:id', auth, (req, res) => {
 
     // Public list of selected volunteers (names only, no private comments)
     t.selected_volunteers = db.prepare(`
-      SELECT u.id, u.first_name, u.last_name, u.group_name
+      SELECT u.id, u.first_name, u.last_name, u.group_name, a.role_name
       FROM applications a
       JOIN users u ON u.id = a.user_id
       WHERE a.task_id = ? AND a.status IN ('SELECTED', 'IN_PROGRESS', 'COMPLETED')
     `).all(t.id);
     t.applicants = [];
   } else {
-    // Staff & Admin see full list of all applicants with detailed profiles
-    t.applicants = db.prepare(`
+    // Staff & Admin see full list of all applicants with detailed profiles and order number
+    const applicants = db.prepare(`
       SELECT a.*,
         u.first_name, u.last_name, u.group_name, u.year, u.email, u.phone, u.max_contact, u.skills,
         (SELECT COALESCE(SUM(amount), 0) FROM points WHERE user_id = u.id) as student_points,
@@ -1213,6 +1344,11 @@ app.get('/api/tasks/:id', auth, (req, res) => {
       WHERE a.task_id = ?
       ORDER BY a.created_at ASC
     `).all(t.id);
+
+    t.applicants = applicants.map((app, idx) => ({
+      ...app,
+      order_num: idx + 1
+    }));
   }
 
   res.json(t);
@@ -1228,18 +1364,32 @@ app.post('/api/tasks', auth, role('STAFF', 'ADMIN'), (req, res) => {
     return res.status(400).json({ error: 'Дата проведения обязательна' });
   }
 
-  const points = Math.max(0, parseInt(d.points, 10) || 0);
+  const rawPoints = parseInt(d.points, 10);
+  const points = Math.min(MAX_POINTS_PER_TRANSACTION, Math.max(0, isNaN(rawPoints) ? 0 : rawPoints));
   const required = Math.max(1, parseInt(d.required_volunteers, 10) || 1);
   const status = ['DRAFT', 'OPEN', 'ASSIGNMENT_IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'ARCHIVED'].includes(d.status)
     ? d.status
     : 'OPEN';
   const priority = ['LOW', 'NORMAL', 'HIGH', 'URGENT'].includes(d.priority) ? d.priority : 'NORMAL';
 
+  if (d.start_time && d.end_time && String(d.end_time).trim() < String(d.start_time).trim()) {
+    return res.status(400).json({ error: 'Время окончания не может быть раньше времени начала' });
+  }
+
+  let rolesNeededJson = null;
+  if (d.roles_needed) {
+    rolesNeededJson = typeof d.roles_needed === 'string' ? d.roles_needed : JSON.stringify(d.roles_needed);
+  }
+
+  const customCategory = (d.category === 'Другое' && d.custom_category) ? String(d.custom_category).trim() : null;
+  const locationType = ['department', 'custom'].includes(d.location_type) ? d.location_type : 'custom';
+
   const r = db.prepare(`
     INSERT INTO tasks (
       title, description, category, creator_id, event_date, start_time, end_time,
-      location, required_volunteers, skills, points, priority, deadline, status, equipment, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      location, required_volunteers, skills, points, priority, deadline, status,
+      equipment, notes, roles_needed, location_type, custom_category
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     d.title.trim(),
     d.description ? d.description.trim() : '',
@@ -1256,7 +1406,10 @@ app.post('/api/tasks', auth, role('STAFF', 'ADMIN'), (req, res) => {
     d.deadline || null,
     status,
     d.equipment ? d.equipment.trim() : '',
-    d.notes ? d.notes.trim() : ''
+    d.notes ? d.notes.trim() : '',
+    rolesNeededJson,
+    locationType,
+    customCategory
   );
 
   audit(req.user.id, 'TASK_CREATED', 'TASK', r.lastInsertRowid, { title: d.title, status });
@@ -1281,23 +1434,41 @@ app.patch('/api/tasks/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
   const location = d.location !== undefined ? d.location : existing.location;
   const required_volunteers = d.required_volunteers !== undefined ? Math.max(1, parseInt(d.required_volunteers, 10) || 1) : existing.required_volunteers;
   const skills = d.skills !== undefined ? d.skills : existing.skills;
-  const points = d.points !== undefined ? Math.max(0, parseInt(d.points, 10) || 0) : existing.points;
+
+  const rawPoints = d.points !== undefined ? parseInt(d.points, 10) : existing.points;
+  const points = Math.min(MAX_POINTS_PER_TRANSACTION, Math.max(0, isNaN(rawPoints) ? 0 : rawPoints));
+
   const priority = d.priority !== undefined ? d.priority : existing.priority;
   const deadline = d.deadline !== undefined ? d.deadline : existing.deadline;
   const status = d.status !== undefined ? d.status : existing.status;
   const equipment = d.equipment !== undefined ? d.equipment : existing.equipment;
   const notes = d.notes !== undefined ? d.notes : existing.notes;
 
+  if (start_time && end_time && String(end_time).trim() < String(start_time).trim()) {
+    return res.status(400).json({ error: 'Время окончания не может быть раньше времени начала' });
+  }
+
+  let roles_needed = existing.roles_needed;
+  if (d.roles_needed !== undefined) {
+    roles_needed = typeof d.roles_needed === 'string' ? d.roles_needed : JSON.stringify(d.roles_needed);
+  }
+
+  const location_type = d.location_type !== undefined ? d.location_type : existing.location_type;
+  const custom_category = (category === 'Другое' && d.custom_category !== undefined)
+    ? String(d.custom_category).trim()
+    : (category === 'Другое' ? existing.custom_category : null);
+
   db.prepare(`
     UPDATE tasks SET
       title = ?, description = ?, category = ?, event_date = ?, start_time = ?, end_time = ?,
       location = ?, required_volunteers = ?, skills = ?, points = ?, priority = ?, deadline = ?,
-      status = ?, equipment = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+      status = ?, equipment = ?, notes = ?, roles_needed = ?, location_type = ?, custom_category = ?,
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     title, description, category, event_date, start_time, end_time,
     location, required_volunteers, skills, points, priority, deadline,
-    status, equipment, notes, taskId
+    status, equipment, notes, roles_needed, location_type, custom_category, taskId
   );
 
   audit(req.user.id, 'TASK_UPDATED', 'TASK', taskId, { title, status, points });
@@ -1337,11 +1508,13 @@ app.post('/api/tasks/:id/apply', auth, role('STUDENT'), (req, res) => {
     return res.status(400).json({ error: 'Приём заявок на это мероприятие закрыт (статус: ' + task.status + ')' });
   }
 
+  const roleName = req.body.role_name ? String(req.body.role_name).trim() : null;
+
   const existingApp = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(taskId, req.user.id);
   if (existingApp) {
     if (existingApp.status === 'WITHDRAWN') {
       // Re-apply if previously withdrawn
-      db.prepare("UPDATE applications SET status = 'APPLIED', comment = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.body.comment || '', existingApp.id);
+      db.prepare("UPDATE applications SET status = 'APPLIED', comment = ?, role_name = COALESCE(?, role_name), updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.body.comment || '', roleName, existingApp.id);
       createNotification(task.creator_id, 'Повторный отклик', `${req.user.first_name} ${req.user.last_name} повторно подал(а) заявку на «${task.title}»`, `/tasks/${taskId}`);
       audit(req.user.id, 'APPLICATION_REOPENED', 'APPLICATION', existingApp.id, { taskId });
       return res.json({ ok: true, message: 'Заявка повторно подана' });
@@ -1350,15 +1523,15 @@ app.post('/api/tasks/:id/apply', auth, role('STUDENT'), (req, res) => {
   }
 
   const r = db.prepare(`
-    INSERT INTO applications (task_id, user_id, comment, status)
-    VALUES (?, ?, ?, 'APPLIED')
-  `).run(taskId, req.user.id, req.body.comment ? String(req.body.comment).trim() : '');
+    INSERT INTO applications (task_id, user_id, comment, status, role_name)
+    VALUES (?, ?, ?, 'APPLIED', ?)
+  `).run(taskId, req.user.id, req.body.comment ? String(req.body.comment).trim() : '', roleName);
 
   // Notify creator
   if (task.creator_id) {
     createNotification(
       task.creator_id,
-      'Новый отклик волонтёра',
+      'Новый отклик медиаволонтёра',
       `${req.user.first_name} ${req.user.last_name} откликнулся на «${task.title}»`,
       `/tasks/${taskId}`
     );
@@ -1396,7 +1569,7 @@ app.post('/api/tasks/:id/submit-completion', auth, role('STUDENT'), (req, res) =
   if (!appRecord) return res.status(404).json({ error: 'Вы не являетесь участником этого мероприятия' });
 
   if (!['SELECTED', 'IN_PROGRESS'].includes(appRecord.status)) {
-    return res.status(400).json({ error: 'Отправка отчёта доступна только для отобранных волонтёров' });
+    return res.status(400).json({ error: 'Отправка отчёта доступна только для отобранных медиаволонтёров' });
   }
 
   const notes = req.body.submission_notes ? String(req.body.submission_notes).trim() : '';
@@ -1410,7 +1583,7 @@ app.post('/api/tasks/:id/submit-completion', auth, role('STUDENT'), (req, res) =
   if (task && task.creator_id) {
     createNotification(
       task.creator_id,
-      'Работа сдана волонтёром',
+      'Работа сдана медиаволонтёром',
       `${req.user.first_name} ${req.user.last_name} отправил(а) отчёт по мероприятию «${task.title}»`,
       `/tasks/${taskId}`
     );
@@ -1436,7 +1609,7 @@ app.patch('/api/applications/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
 
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(appRecord.task_id);
   const statusLabels = {
-    SELECTED: 'Вы отобраны волонтёром',
+    SELECTED: 'Вы отобраны медиаволонтёром',
     REJECTED: 'Заявка отклонена',
     IN_PROGRESS: 'Мероприятие в процессе выполнения',
     COMPLETED: 'Участие успешно подтверждено',
@@ -1489,7 +1662,8 @@ app.post('/api/tasks/:id/complete', auth, role('STAFF', 'ADMIN'), (req, res) => 
   }
 
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-  const awardPoints = req.body.points !== undefined ? Math.max(0, parseInt(req.body.points, 10) || 0) : (task.points || 0);
+  const rawPoints = req.body.points !== undefined ? parseInt(req.body.points, 10) : task.points;
+  const awardPoints = Math.min(MAX_POINTS_PER_TRANSACTION, Math.max(0, isNaN(rawPoints) ? 0 : rawPoints));
   const reason = req.body.reason || `Успешное выполнение: «${task.title}»`;
 
   const tx = db.transaction(() => {
@@ -1529,8 +1703,11 @@ app.post('/api/points/award', auth, role('STAFF', 'ADMIN'), (req, res) => {
   if (!reason || !reason.trim()) return res.status(400).json({ error: 'Укажите причину начисления' });
 
   const numAmount = parseInt(amount, 10);
-  if (isNaN(numAmount) || numAmount === 0) {
-    return res.status(400).json({ error: 'Сумма баллов должна быть отличной от 0' });
+  if (isNaN(numAmount) || numAmount <= 0) {
+    return res.status(400).json({ error: 'Сумма баллов должна быть больше 0' });
+  }
+  if (numAmount > MAX_POINTS_PER_TRANSACTION) {
+    return res.status(400).json({ error: `Сумма баллов за одну операцию не может превышать ${MAX_POINTS_PER_TRANSACTION}` });
   }
 
   const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user_id);
@@ -1544,8 +1721,8 @@ app.post('/api/points/award', auth, role('STAFF', 'ADMIN'), (req, res) => {
 
   createNotification(
     user_id,
-    numAmount > 0 ? 'Начислены баллы в зачётку' : 'Корректировка баллов',
-    `${numAmount > 0 ? '+' : ''}${numAmount} баллов: ${reason}`,
+    'Начислены баллы в зачётку',
+    `+${numAmount} баллов: ${reason}`,
     '/record-book'
   );
 
@@ -1557,6 +1734,67 @@ app.post('/api/points/award', auth, role('STAFF', 'ADMIN'), (req, res) => {
   });
 
   res.status(201).json({ ok: true, id: r.lastInsertRowid, message: 'Баллы успешно внесены в ledger' });
+});
+
+// Staff / Admin reverses points transaction
+app.post('/api/points/:id/reverse', auth, role('STAFF', 'ADMIN'), (req, res) => {
+  const pointId = req.params.id;
+  const original = db.prepare('SELECT * FROM points WHERE id = ?').get(pointId);
+  if (!original) return res.status(404).json({ error: 'Запись начисления не найдена' });
+
+  if (original.is_reversed === 1) {
+    return res.status(400).json({ error: 'Это начисление уже было отменено' });
+  }
+
+  if (original.amount <= 0) {
+    return res.status(400).json({ error: 'Нельзя отменить отрицательную или нулевую запись' });
+  }
+
+  const { reason } = req.body || {};
+  if (!reason || !String(reason).trim()) {
+    return res.status(400).json({ error: 'Укажите причину отмены начисления' });
+  }
+  const cleanReason = String(reason).trim();
+
+  let counterTxId;
+  const tx = db.transaction(() => {
+    // 1. Mark original as reversed
+    db.prepare('UPDATE points SET is_reversed = 1, reversal_reason = ? WHERE id = ?').run(cleanReason, pointId);
+
+    // 2. Create counter transaction
+    const r = db.prepare(`
+      INSERT INTO points (user_id, amount, reason, category, task_id, issued_by, reversal_of_id)
+      VALUES (?, ?, ?, 'CORRECTION', ?, ?, ?)
+    `).run(
+      original.user_id,
+      -original.amount,
+      `Отмена начисления: ${cleanReason}`,
+      original.task_id || null,
+      req.user.id,
+      original.id
+    );
+    counterTxId = r.lastInsertRowid;
+
+    // 3. Notify student
+    createNotification(
+      original.user_id,
+      'Отмена начисления баллов',
+      `Отменено начисление ${original.amount} баллов. Причина: ${cleanReason}`,
+      '/record-book'
+    );
+  });
+
+  tx();
+
+  audit(req.user.id, 'POINTS_REVERSED', 'POINT', original.id, {
+    originalPointId: original.id,
+    counterTxId,
+    studentId: original.user_id,
+    reversalAmount: original.amount,
+    reason: cleanReason
+  });
+
+  res.json({ ok: true, message: `Начисление ${original.amount} баллов успешно отменено`, counterTxId });
 });
 
 // Get record book for current user
@@ -1742,8 +1980,15 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
   if (!d.login || !d.login.trim()) {
     return res.status(400).json({ error: 'Логин обязателен' });
   }
-  if (!d.password || String(d.password).length < 6) {
-    return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
+
+  let finalPassword = '';
+  if (d.generate_password || !d.password) {
+    finalPassword = generateTemporaryPassword();
+  } else {
+    if (String(d.password).length < 6) {
+      return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
+    }
+    finalPassword = String(d.password);
   }
 
   const cleanLogin = String(d.login).trim().toLowerCase();
@@ -1751,10 +1996,12 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
   const userRole = validRoles.includes(d.role) ? d.role : 'STUDENT';
 
   try {
-    const pwHash = bcrypt.hashSync(d.password, 10);
+    const pwHash = bcrypt.hashSync(finalPassword, 10);
     const r = db.prepare(`
-      INSERT INTO users (login, password_hash, role, first_name, last_name, middle_name, email, group_name, year, bio, skills, phone, max_contact, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (
+        login, password_hash, role, first_name, last_name, middle_name,
+        email, group_name, year, bio, skills, phone, max_contact, status, must_change_password
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       cleanLogin,
       pwHash,
@@ -1778,7 +2025,12 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
       name: `${d.first_name || ''} ${d.last_name || ''}`
     });
 
-    res.status(201).json({ id: r.lastInsertRowid, message: 'Пользователь успешно создан' });
+    res.status(201).json({
+      id: r.lastInsertRowid,
+      message: 'Пользователь успешно создан',
+      login: cleanLogin,
+      temporaryPassword: finalPassword
+    });
   } catch (err) {
     if (err.message.includes('UNIQUE constraint failed: users.login')) {
       return res.status(400).json({ error: 'Пользователь с таким логином уже существует' });
@@ -1838,19 +2090,29 @@ app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
 // Reset user password (Admin only)
 app.post('/api/users/:id/reset-password', auth, role('ADMIN'), (req, res) => {
   const targetId = req.params.id;
-  const { newPassword } = req.body || {};
-  if (!newPassword || String(newPassword).length < 6) {
-    return res.status(400).json({ error: 'Новый пароль должен содержать не менее 6 символов' });
-  }
-
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!existing) return res.status(404).json({ error: 'Пользователь не найден' });
 
-  const newHash = bcrypt.hashSync(String(newPassword), 10);
+  const { newPassword, generate } = req.body || {};
+  let finalPassword = '';
+  if (generate || !newPassword) {
+    finalPassword = generateTemporaryPassword();
+  } else {
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ error: 'Новый пароль должен содержать не менее 6 символов' });
+    }
+    finalPassword = String(newPassword);
+  }
+
+  const newHash = bcrypt.hashSync(finalPassword, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(newHash, targetId);
 
   audit(req.user.id, 'PASSWORD_RESET_BY_ADMIN', 'USER', targetId, { login: existing.login });
-  res.json({ ok: true, message: `Пароль пользователя ${existing.login} успешно сброшен (при входе потребуется сменить пароль)` });
+  res.json({
+    ok: true,
+    message: `Пароль пользователя ${existing.login} успешно сброшен (при входе потребуется сменить пароль)`,
+    temporaryPassword: finalPassword
+  });
 });
 
 // ==========================================

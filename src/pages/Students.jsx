@@ -47,7 +47,7 @@ export default function Students({ user }) {
       const res = await api(`/users?role=STUDENT&status=ACTIVE&search=${encodeURIComponent(search.trim())}`);
       setStudents(res);
     } catch (err) {
-      toast.error('Не удалось загрузить волонтёров: ' + err.message);
+      toast.error('Не удалось загрузить медиаволонтёров: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -104,7 +104,7 @@ export default function Students({ user }) {
           category: awardCategory
         })
       });
-      toast.success(`Успешно начислено ${awardAmount} баллов волонтёру!`);
+      toast.success(`Успешно начислено ${awardAmount} баллов медиаволонтёру!`);
       setAwardModalOpen(false);
       setAwardReason('');
       // Reload profile & directory
@@ -124,7 +124,7 @@ export default function Students({ user }) {
 
   return (
     <Page
-      title="Команда волонтёров"
+      title="Команда медиаволонтёров"
       subtitle="Каталог участников медиацентра, специализации, зачётки и сезонный рейтинг активности."
       actions={
         <div className="tab-pills-row">
@@ -133,7 +133,7 @@ export default function Students({ user }) {
             className={`tab-pill-btn ${activeTab === 'directory' ? 'active' : ''}`}
             onClick={() => setActiveTab('directory')}
           >
-            Каталог волонтёров
+            Каталог медиаволонтёров
           </button>
           <button
             type="button"
@@ -160,7 +160,7 @@ export default function Students({ user }) {
               <Search size={16} className="search-icon" />
               <input
                 type="text"
-                placeholder="Поиск по имени, группе или навыкам (фото, видео, монтаж, SMM)…"
+                placeholder="Поиск по имени, группе или навыкам (фото, видео, монтаж, СММ)…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -172,7 +172,7 @@ export default function Students({ user }) {
 
           {/* Volunteers Grid */}
           {loading ? (
-            <Loader text="Загружаем каталог волонтёров…" />
+            <Loader text="Загружаем каталог медиаволонтёров…" />
           ) : students.length > 0 ? (
             <div className="students-grid">
               {students.map((s) => (
@@ -224,7 +224,7 @@ export default function Students({ user }) {
             </div>
           ) : (
             <Empty
-              title="Волонтёры не найдены"
+              title="Медиаволонтёры не найдены"
               text="Попробуйте изменить поисковый запрос."
             />
           )}
@@ -235,7 +235,7 @@ export default function Students({ user }) {
       {activeTab === 'leaderboard' && (
         <div className="embedded-leaderboard">
           {loading ? (
-            <Loader text="Загружаем рейтинг волонтёров…" />
+            <Loader text="Загружаем рейтинг медиаволонтёров…" />
           ) : (
             <>
               {/* Podium for Top 3 */}
@@ -255,7 +255,7 @@ export default function Students({ user }) {
                         <h3 className="podium-name">
                           {top3[1].first_name} {top3[1].last_name}
                         </h3>
-                        <small className="muted">{top3[1].group_name || 'Волонтёр'}</small>
+                        <small className="muted">{top3[1].group_name || 'Медиаволонтёр'}</small>
                         <div className="podium-score">
                           <strong>{top3[1].points}</strong> <small>баллов</small>
                         </div>
@@ -277,7 +277,7 @@ export default function Students({ user }) {
                         <h3 className="podium-name">
                           {top3[0].first_name} {top3[0].last_name}
                         </h3>
-                        <small className="muted">{top3[0].group_name || 'Волонтёр'}</small>
+                        <small className="muted">{top3[0].group_name || 'Медиаволонтёр'}</small>
                         <div className="podium-score gold">
                           <strong>{top3[0].points}</strong> <small>баллов</small>
                         </div>
@@ -298,7 +298,7 @@ export default function Students({ user }) {
                         <h3 className="podium-name">
                           {top3[2].first_name} {top3[2].last_name}
                         </h3>
-                        <small className="muted">{top3[2].group_name || 'Волонтёр'}</small>
+                        <small className="muted">{top3[2].group_name || 'Медиаволонтёр'}</small>
                         <div className="podium-score">
                           <strong>{top3[2].points}</strong> <small>баллов</small>
                         </div>
@@ -313,7 +313,7 @@ export default function Students({ user }) {
               <div className="panel leaderboard-panel">
                 <div className="section-head">
                   <h2>Таблица лидеров сезона</h2>
-                  <span className="muted">Всего волонтёров: {leaderboardRows.length}</span>
+                  <span className="muted">Всего медиаволонтёров: {leaderboardRows.length}</span>
                 </div>
 
                 <div className="table-responsive">
@@ -321,7 +321,7 @@ export default function Students({ user }) {
                     <thead>
                       <tr>
                         <th style={{ width: '60px' }}>Место</th>
-                        <th>Волонтёр</th>
+                        <th>Медиаволонтёр</th>
                         <th>Группа</th>
                         <th>Выполнено</th>
                         <th style={{ textAlign: 'right' }}>Баллы</th>
@@ -377,11 +377,11 @@ export default function Students({ user }) {
             setSelectedStudent(null);
             setStudentDetails(null);
           }}
-          title="Профиль волонтёра"
+          title="Профиль медиаволонтёра"
           maxWidth="680px"
         >
           {detailsLoading || !studentDetails ? (
-            <Loader text="Загрузка профиля волонтёра…" />
+            <Loader text="Загрузка профиля медиаволонтёра…" />
           ) : (
             <div className="profile-modal-body">
               {/* Header Meta */}
@@ -396,7 +396,7 @@ export default function Students({ user }) {
                     {studentDetails.user.first_name} {studentDetails.user.last_name}
                   </h2>
                   <p className="muted">
-                    {studentDetails.user.group_name || 'Волонтёр'}
+                    {studentDetails.user.group_name || 'Медиаволонтёр'}
                     {studentDetails.user.year ? ` · ${studentDetails.user.year} курс` : ''}
                   </p>
 
@@ -408,7 +408,7 @@ export default function Students({ user }) {
                     )}
                     {studentDetails.user.max_contact && (
                       <span className="contact-chip">
-                        <MessageSquare size={13} /> MAX: {studentDetails.user.max_contact}
+                        <MessageSquare size={13} /> Макс: {studentDetails.user.max_contact}
                       </span>
                     )}
                     {studentDetails.user.email && (
@@ -535,7 +535,9 @@ export default function Students({ user }) {
                       })}
                     </div>
                   ) : (
-                    <p className="muted">Записей в зачётке пока нет.</p>
+                    <p className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>
+                      Записей в зачётной книжке пока нет.
+                    </p>
                   )}
                 </div>
               )}
@@ -546,7 +548,7 @@ export default function Students({ user }) {
                   to={`/record-book?userId=${studentDetails.user.id}`}
                   className="btn ghost"
                 >
-                  <BookOpen size={16} /> Полная зачётка волонтёра
+                  <BookOpen size={16} /> Полная зачётка медиаволонтёра
                 </Link>
 
                 {isStaffOrAdmin && (
@@ -572,9 +574,11 @@ export default function Students({ user }) {
         >
           <form onSubmit={handleAwardPoints} className="modal-form">
             <div className="form-group">
-              <label>Количество баллов</label>
+              <label>Количество баллов (до 100)</label>
               <input
                 type="number"
+                min="1"
+                max="100"
                 required
                 value={awardAmount}
                 onChange={(e) => setAwardAmount(e.target.value)}
@@ -587,17 +591,17 @@ export default function Students({ user }) {
                 value={awardCategory}
                 onChange={(e) => setAwardCategory(e.target.value)}
               >
-                <option value="BONUS">Бонус за активность (BONUS)</option>
-                <option value="EVENT">Участие в мероприятии (EVENT)</option>
-                <option value="PHOTO_VIDEO">Фото/Видео производство (PHOTO_VIDEO)</option>
-                <option value="SMM">SMM и дизайн (SMM)</option>
-                <option value="PENALTY">Корректировка (PENALTY)</option>
-                <option value="OTHER">Прочее (OTHER)</option>
+                <option value="BONUS">Бонус за активность</option>
+                <option value="EVENT">Участие в мероприятии</option>
+                <option value="PHOTO_VIDEO">Фото и видео</option>
+                <option value="SMM">СММ и дизайн</option>
+                <option value="PENALTY">Корректировка</option>
+                <option value="OTHER">Прочее</option>
               </select>
             </div>
 
             <div className="form-group">
-              <label>Основание для начисления (будет видно в зачётке волонтёра)</label>
+              <label>Основание для начисления (будет видно в зачётке медиаволонтёра)</label>
               <input
                 type="text"
                 required

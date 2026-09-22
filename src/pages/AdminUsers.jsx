@@ -9,12 +9,21 @@ import {
   Search,
   Filter,
   UserPlus,
-  Lock
+  Lock,
+  Copy,
+  Check,
+  Sparkles
 } from 'lucide-react';
 import { api } from '../api.js';
 import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+
+const ROLE_LABELS = {
+  ADMIN: 'Администратор',
+  STAFF: 'Сотрудник',
+  STUDENT: 'Медиаволонтёр'
+};
 
 export default function AdminUsers({ currentUser }) {
   const [users, setUsers] = useState([]);
@@ -28,11 +37,14 @@ export default function AdminUsers({ currentUser }) {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editUser, setEditUser] = useState(null);
   const [passwordModalUser, setPasswordModalUser] = useState(null);
+  const [createdCredentialsNotice, setCreatedCredentialsNotice] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
 
   // Forms
   const [createForm, setCreateForm] = useState({
     login: '',
-    password: 'Demo123!',
+    generate_password: true,
+    password: '',
     role: 'STUDENT',
     first_name: '',
     last_name: '',
@@ -73,15 +85,22 @@ export default function AdminUsers({ currentUser }) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api('/users', {
+      const res = await api('/users', {
         method: 'POST',
         body: JSON.stringify(createForm)
       });
-      toast.success(`Пользователь «${createForm.login}» успешно создан!`);
+      toast.success(`Пользователь «${res.login || createForm.login}» успешно создан!`);
       setCreateModalOpen(false);
+      setCreatedCredentialsNotice({
+        title: 'Учётная запись успешно создана',
+        subtitle: `Пользователь ${createForm.first_name || ''} ${createForm.last_name || ''} зарегистрирован. Сохраните временные данные для входа:`,
+        login: res.login || createForm.login,
+        temporaryPassword: res.temporaryPassword
+      });
       setCreateForm({
         login: '',
-        password: 'Demo123!',
+        generate_password: true,
+        password: '',
         role: 'STUDENT',
         first_name: '',
         last_name: '',
@@ -141,18 +160,27 @@ export default function AdminUsers({ currentUser }) {
     }
   };
 
-  const handleResetPasswordSubmit = async (e) => {
-    e.preventDefault();
+  const handleResetPasswordSubmit = async (e, forceGenerate = false) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!passwordModalUser) return;
     setBusy(true);
     try {
-      await api(`/users/${passwordModalUser.id}/reset-password`, {
+      const body = forceGenerate || !newPassword ? { generate: true } : { newPassword };
+      const res = await api(`/users/${passwordModalUser.id}/reset-password`, {
         method: 'POST',
-        body: JSON.stringify({ newPassword })
+        body: JSON.stringify(body)
       });
-      toast.success(`Пароль для ${passwordModalUser.login} успешно изменён!`);
+      toast.success(`Пароль для @${passwordModalUser.login} сброшен!`);
+      const targetLogin = passwordModalUser.login;
       setPasswordModalUser(null);
       setNewPassword('');
+      setCreatedCredentialsNotice({
+        title: 'Временный пароль установлен',
+        subtitle: `Новые учётные данные для пользователя @${targetLogin}. При входе потребуется сменить пароль:`,
+        login: targetLogin,
+        temporaryPassword: res.temporaryPassword
+      });
+      loadUsers();
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -199,7 +227,7 @@ export default function AdminUsers({ currentUser }) {
               onChange={(e) => setRoleFilter(e.target.value)}
             >
               <option value="ALL">Все роли</option>
-              <option value="STUDENT">Волонтёры</option>
+              <option value="STUDENT">Медиаволонтёры</option>
               <option value="STAFF">Кураторы и сотрудники</option>
               <option value="ADMIN">Администраторы</option>
             </select>
@@ -255,7 +283,7 @@ export default function AdminUsers({ currentUser }) {
                       </div>
                     </td>
                     <td>
-                      <span className={`role-chip role-${u.role.toLowerCase()}`}>{u.role}</span>
+                      <span className={`role-chip role-${u.role.toLowerCase()}`}>{ROLE_LABELS[u.role] || u.role}</span>
                     </td>
                     <td>
                       <span>{u.group_name || '—'}</span>
@@ -320,28 +348,42 @@ export default function AdminUsers({ currentUser }) {
           maxWidth="640px"
         >
           <form onSubmit={handleCreateSubmit} className="modal-form">
-            <div className="form-grid-2">
-              <div className="form-group">
-                <label>Логин *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ivan_petrov"
-                  value={createForm.login}
-                  onChange={(e) => setCreateForm({ ...createForm, login: e.target.value })}
-                />
-              </div>
+            <div className="form-group">
+              <label>Логин *</label>
+              <input
+                type="text"
+                required
+                placeholder="ivan_petrov"
+                value={createForm.login}
+                onChange={(e) => setCreateForm({ ...createForm, login: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, '') })}
+              />
+            </div>
 
-              <div className="form-group">
-                <label>Пароль *</label>
+            <div className="form-group" style={{ background: 'var(--surface2)', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '14px' }}>
+              <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0 }}>
                 <input
-                  type="password"
-                  required
-                  placeholder="Минимум 6 знаков"
-                  value={createForm.password}
-                  onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                  type="checkbox"
+                  checked={createForm.generate_password}
+                  onChange={(e) => setCreateForm({ ...createForm, generate_password: e.target.checked })}
                 />
-              </div>
+                <span style={{ fontWeight: 600, fontSize: '13px' }}>Сгенерировать надёжный временный пароль автоматически</span>
+              </label>
+              <small className="muted" style={{ display: 'block', marginTop: '4px', fontSize: '11.5px' }}>
+                Пароль будет показан вам в отдельном окне после создания для копирования и передачи пользователю.
+              </small>
+
+              {!createForm.generate_password && (
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>Пароль вручную *</label>
+                  <input
+                    type="password"
+                    required={!createForm.generate_password}
+                    placeholder="Минимум 6 знаков"
+                    value={createForm.password}
+                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="form-grid-3">
@@ -351,7 +393,7 @@ export default function AdminUsers({ currentUser }) {
                   value={createForm.role}
                   onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
                 >
-                  <option value="STUDENT">Волонтёр</option>
+                  <option value="STUDENT">Медиаволонтёр</option>
                   <option value="STAFF">Куратор / Сотрудник</option>
                   <option value="ADMIN">Администратор</option>
                 </select>
@@ -390,7 +432,7 @@ export default function AdminUsers({ currentUser }) {
                 <label>Группа</label>
                 <input
                   type="text"
-                  placeholder="media-21"
+                  placeholder="медиа-21"
                   value={createForm.group_name}
                   onChange={(e) => setCreateForm({ ...createForm, group_name: e.target.value })}
                 />
@@ -412,7 +454,7 @@ export default function AdminUsers({ currentUser }) {
               <label>Навыки (через запятую)</label>
               <input
                 type="text"
-                placeholder="Фотография, Видеомонтаж, SMM, Копирайтинг"
+                placeholder="Фотография, Видеомонтаж, СММ, Копирайтинг"
                 value={createForm.skills}
                 onChange={(e) => setCreateForm({ ...createForm, skills: e.target.value })}
               />
@@ -430,10 +472,10 @@ export default function AdminUsers({ currentUser }) {
               </div>
 
               <div className="form-group">
-                <label>Контакт в мессенджере MAX</label>
+                <label>Контакт в мессенджере Макс</label>
                 <input
                   type="text"
-                  placeholder="@username или телефон в MAX"
+                  placeholder="@ник или телефон в Макс"
                   value={createForm.max_contact}
                   onChange={(e) => setCreateForm({ ...createForm, max_contact: e.target.value })}
                 />
@@ -481,7 +523,7 @@ export default function AdminUsers({ currentUser }) {
                   value={editUser.role}
                   onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
                 >
-                  <option value="STUDENT">Волонтёр</option>
+                  <option value="STUDENT">Медиаволонтёр</option>
                   <option value="STAFF">Куратор / Сотрудник</option>
                   <option value="ADMIN">Администратор</option>
                 </select>
@@ -493,8 +535,8 @@ export default function AdminUsers({ currentUser }) {
                   value={editUser.status}
                   onChange={(e) => setEditUser({ ...editUser, status: e.target.value })}
                 >
-                  <option value="ACTIVE">Активен (ACTIVE)</option>
-                  <option value="INACTIVE">Деактивирован (INACTIVE)</option>
+                  <option value="ACTIVE">Активен</option>
+                  <option value="INACTIVE">Деактивирован</option>
                 </select>
               </div>
             </div>
@@ -571,10 +613,10 @@ export default function AdminUsers({ currentUser }) {
               </div>
 
               <div className="form-group">
-                <label>Контакт в мессенджере MAX</label>
+                <label>Контакт в мессенджере Макс</label>
                 <input
                   type="text"
-                  placeholder="@username или телефон в MAX"
+                  placeholder="@ник или телефон в Макс"
                   value={editUser.max_contact || ''}
                   onChange={(e) => setEditUser({ ...editUser, max_contact: e.target.value })}
                 />
@@ -611,25 +653,24 @@ export default function AdminUsers({ currentUser }) {
         <Modal
           isOpen={true}
           onClose={() => setPasswordModalUser(null)}
-          title={`Сброс пароля для ${passwordModalUser.login}`}
+          title={`Сброс пароля: @${passwordModalUser.login}`}
         >
-          <form onSubmit={handleResetPasswordSubmit} className="modal-form">
-            <p className="muted">
-              Установите новый пароль для пользователя <b>{passwordModalUser.first_name} {passwordModalUser.last_name}</b> (@{passwordModalUser.login}).
+          <form onSubmit={(e) => handleResetPasswordSubmit(e, false)} className="modal-form">
+            <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5 }}>
+              Сброс пароля для <b>{passwordModalUser.first_name} {passwordModalUser.last_name}</b> (@{passwordModalUser.login}). Вы можете сгенерировать временный пароль автоматически или задать его вручную.
             </p>
 
-            <div className="form-group">
-              <label>Новый пароль (минимум 6 символов)</label>
+            <div className="form-group" style={{ marginTop: '12px' }}>
+              <label>Пароль вручную (или оставьте пустым для автогенерации)</label>
               <input
                 type="text"
-                required
-                placeholder="Введите новый пароль"
+                placeholder="Минимум 6 символов или оставьте пустым"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
               />
             </div>
 
-            <div className="modal-actions">
+            <div className="modal-actions" style={{ marginTop: '16px' }}>
               <button
                 type="button"
                 className="btn ghost"
@@ -637,11 +678,109 @@ export default function AdminUsers({ currentUser }) {
               >
                 Отмена
               </button>
-              <button type="submit" className="btn primary" disabled={busy}>
-                {busy ? 'Устанавливаем…' : 'Установить пароль'}
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => handleResetPasswordSubmit(null, true)}
+                disabled={busy}
+              >
+                <Sparkles size={15} /> Сгенерировать пароль
               </button>
+              {newPassword && (
+                <button type="submit" className="btn primary" disabled={busy}>
+                  {busy ? 'Сохраняем…' : 'Установить пароль'}
+                </button>
+              )}
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* ONE-TIME CREDENTIALS NOTICE MODAL */}
+      {createdCredentialsNotice && (
+        <Modal
+          isOpen={true}
+          onClose={() => setCreatedCredentialsNotice(null)}
+          title={createdCredentialsNotice.title}
+          maxWidth="500px"
+        >
+          <div style={{ padding: '4px 0' }}>
+            <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '16px' }}>
+              {createdCredentialsNotice.subtitle}
+            </p>
+
+            <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <span className="muted" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Логин пользователя</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                  <code style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {createdCredentialsNotice.login}
+                  </code>
+                  <button
+                    type="button"
+                    className="btn tiny secondary"
+                    onClick={() => {
+                      navigator.clipboard.writeText(createdCredentialsNotice.login);
+                      setCopiedField('login');
+                      setTimeout(() => setCopiedField(null), 2000);
+                    }}
+                  >
+                    {copiedField === 'login' ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+                    <span>{copiedField === 'login' ? 'Скопировано' : 'Копировать'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                <span className="muted" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Временный пароль (показывается разово)</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                  <code style={{ fontSize: '16px', fontWeight: 700, letterSpacing: '0.05em', color: 'var(--accent)' }}>
+                    {createdCredentialsNotice.temporaryPassword}
+                  </code>
+                  <button
+                    type="button"
+                    className="btn tiny secondary"
+                    onClick={() => {
+                      navigator.clipboard.writeText(createdCredentialsNotice.temporaryPassword);
+                      setCopiedField('password');
+                      setTimeout(() => setCopiedField(null), 2000);
+                    }}
+                  >
+                    {copiedField === 'password' ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+                    <span>{copiedField === 'password' ? 'Скопировано' : 'Копировать'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <p className="muted" style={{ fontSize: '12px', marginTop: '14px', lineHeight: 1.4 }}>
+              ✦ Пользователь обязан сменить этот временный пароль при первом входе в систему.
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  const text = `Логин: ${createdCredentialsNotice.login}\nВременный пароль: ${createdCredentialsNotice.temporaryPassword}`;
+                  navigator.clipboard.writeText(text);
+                  setCopiedField('all');
+                  setTimeout(() => setCopiedField(null), 2000);
+                }}
+              >
+                {copiedField === 'all' ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+                <span>{copiedField === 'all' ? 'Все данные скопированы' : 'Скопировать всё'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => setCreatedCredentialsNotice(null)}
+              >
+                Понятно, закрыть
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </Page>

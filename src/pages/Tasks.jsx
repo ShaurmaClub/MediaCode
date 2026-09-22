@@ -4,18 +4,9 @@ import { Search, Plus, Filter, CalendarDays, CheckCircle2 } from 'lucide-react';
 import { api } from '../api.js';
 import { Page, Loader, Empty, TaskCard } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import { EVENT_CATEGORIES } from '../config/eventCategories.js';
 
-const CATEGORIES = [
-  'Все категории',
-  'Событие',
-  'Монтаж',
-  'Фотография',
-  'SMM',
-  'Дизайн',
-  'Стрим',
-  'Интервью',
-  'Другое'
-];
+const CATEGORIES = ['Все категории', ...EVENT_CATEGORIES];
 
 const STATUS_TABS = [
   { id: 'ALL', label: 'Все' },

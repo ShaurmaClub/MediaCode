@@ -55,8 +55,12 @@ export default function Shell({ user, setUser, theme, setTheme, children }) {
       }
     };
     fetchData();
+    window.addEventListener('notifications-updated', fetchData);
     const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notifications-updated', fetchData);
+    };
   }, [isStaffOrAdmin]);
 
   const handleLogout = async () => {
@@ -92,19 +96,19 @@ export default function Shell({ user, setUser, theme, setTheme, children }) {
   const roleLabels = {
     ADMIN: 'Администратор',
     STAFF: 'Сотрудник',
-    STUDENT: 'Волонтёр'
+    STUDENT: 'Медиаволонтёр'
   };
   const userRoleLabel = roleLabels[user.role] || user.role;
 
   const navLinks = [
     { to: '/dashboard', label: 'Главная', icon: LayoutDashboard },
     { to: '/tasks', label: 'Мероприятия', icon: CalendarDays },
-    { to: '/students', label: 'Волонтёры', icon: Users },
+    { to: '/students', label: 'Медиаволонтёры', icon: Users },
     ...(isStaffOrAdmin
       ? [{ to: '/recruitment', label: 'Заявки на отбор', icon: Inbox, badge: pendingRecruitmentCount }]
       : []),
     { to: '/record-book', label: user.role === 'STUDENT' ? 'Моя зачётка' : 'Зачётка и баллы', icon: BookOpen },
-    { to: '/leaderboard', label: 'Рейтинг', icon: Trophy },
+    { to: '/leaderboard', label: 'Рейтинг медиаволонтёров', icon: Trophy },
     { to: '/notifications', label: 'Уведомления', icon: Bell, badge: unreadCount },
     ...(user.role === 'ADMIN'
       ? [
@@ -122,11 +126,15 @@ export default function Shell({ user, setUser, theme, setTheme, children }) {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <Link to="/dashboard" className="brand-link" title="МедиаКод">
+          <Link to="/dashboard" className="sidebar-brand-link" title="КАИТ20 · МедиаКод">
             {collapsed ? (
-              <img src="/logo-compact.png" alt="МедиаКод" className="brand-img-compact" />
+              <img src="/brand/mediacode.png" alt="МедиаКод" className="sidebar-brand-compact" />
             ) : (
-              <img src="/mediacode-logo.png" alt="МедиаКод" className="brand-img-main" />
+              <div className="sidebar-brand-dual">
+                <img src="/brand/kait20.png" alt="КАИТ20" className="sidebar-brand-kait" />
+                <div className="sidebar-brand-divider" />
+                <img src="/brand/mediacode.png" alt="МедиаКод" className="sidebar-brand-mediacode" />
+              </div>
             )}
           </Link>
           <button

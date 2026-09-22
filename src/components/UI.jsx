@@ -126,27 +126,54 @@ export function TaskCard({ task, isStaff = false }) {
   );
 }
 
-export function PointRow({ point, detailed = false }) {
+export function PointRow({ point, detailed = false, onReverse = null }) {
   const isPositive = point.amount > 0;
+  const isReversed = point.is_reversed === 1;
+
   return (
-    <div className="point-row">
+    <div className={`point-row ${isReversed ? 'point-row-reversed' : ''}`} style={isReversed ? { opacity: 0.65 } : {}}>
       <div className={`point-icon ${!isPositive ? 'negative' : ''}`}>
         <ArrowUpRight size={16} />
       </div>
       <div className="point-details">
-        <b>{point.reason}</b>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <b style={isReversed ? { textDecoration: 'line-through' } : {}}>{point.reason}</b>
+          {isReversed && (
+            <span className="badge badge-danger" style={{ fontSize: '11px', padding: '2px 6px' }}>
+              Отменено: {point.reversal_reason || 'корректировка'}
+            </span>
+          )}
+          {point.reversal_of_id && (
+            <span className="badge badge-secondary" style={{ fontSize: '11px', padding: '2px 6px' }}>
+              Коррекция #{point.reversal_of_id}
+            </span>
+          )}
+        </div>
         <small className="muted">
           Категория: {point.category || 'OTHER'}
           {point.task_title ? ` · «${point.task_title}»` : ''}
           {detailed && point.issuer_name ? ` · Выдал: ${point.issuer_name}` : ''}
         </small>
       </div>
-      <div className="point-right">
-        <strong className={`point-amount ${!isPositive ? 'negative' : 'positive'}`}>
-          {isPositive ? '+' : ''}
-          {point.amount}
-        </strong>
-        <time className="muted">{relativeTime(point.created_at)}</time>
+      <div className="point-right" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div>
+          <strong className={`point-amount ${!isPositive ? 'negative' : 'positive'}`} style={isReversed ? { textDecoration: 'line-through' } : {}}>
+            {isPositive ? '+' : ''}
+            {point.amount}
+          </strong>
+          <time className="muted" style={{ display: 'block', fontSize: '11px' }}>{relativeTime(point.created_at)}</time>
+        </div>
+        {onReverse && isPositive && !isReversed && (
+          <button
+            type="button"
+            className="btn tiny ghost danger-text"
+            onClick={() => onReverse(point)}
+            title="Отменить это начисление"
+            style={{ padding: '4px 8px', fontSize: '11.5px', whiteSpace: 'nowrap' }}
+          >
+            Отменить
+          </button>
+        )}
       </div>
     </div>
   );

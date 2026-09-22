@@ -74,14 +74,14 @@ export default function Dashboard({ user }) {
       if (res?.length > 0) setSelectedStudentId(String(res[0].id));
       setAwardModalOpen(true);
     } catch (err) {
-      toast.error('Не удалось загрузить волонтёров: ' + err.message);
+      toast.error('Не удалось загрузить медиаволонтёров: ' + err.message);
     }
   };
 
   const handleSubmitAward = async (e) => {
     e.preventDefault();
     if (!selectedStudentId) {
-      toast.error('Выберите волонтёра');
+      toast.error('Выберите медиаволонтёра');
       return;
     }
     if (!awardReasonText.trim()) {
@@ -100,7 +100,7 @@ export default function Dashboard({ user }) {
           category: awardCategoryVal
         })
       });
-      toast.success(`Успешно начислено ${awardPointsAmount} баллов волонтёру!`);
+      toast.success(`Успешно начислено ${awardPointsAmount} баллов медиаволонтёру!`);
       setAwardModalOpen(false);
       setAwardReasonText('');
       load();
@@ -266,7 +266,7 @@ export default function Dashboard({ user }) {
   return (
     <Page
       title={isCuratorAdmin ? 'Панель администратора' : 'Панель сотрудника'}
-      subtitle="Управление мероприятиями медиацентра, рассмотрение заявок кандидатов и волонтёров."
+      subtitle="Управление мероприятиями медиацентра, рассмотрение заявок кандидатов и медиаволонтёров."
       actions={
         <div className="staff-actions-row">
           <Link to="/tasks/new" className="btn primary">
@@ -308,7 +308,7 @@ export default function Dashboard({ user }) {
           <div className="stat-card attention-card">
             <div className="stat-icon-wrap"><Clock size={20} /></div>
             <div>
-              <span className="stat-label">Отклики волонтёров</span>
+              <span className="stat-label">Отклики медиаволонтёров</span>
               <strong className="stat-value">{data.stats.pendingApplications || 0}</strong>
               <small className="attention-hint">Ждут отбора на мероприятие</small>
             </div>
@@ -346,7 +346,7 @@ export default function Dashboard({ user }) {
               );
               const maxDisplay = isMaxMatched
                 ? 'используется этот номер'
-                : 'номер не подтверждён как используемый в MAX';
+                : 'номер не подтверждён как используемый в Макс';
 
               return (
                 <div className="candidate-card-row" key={app.id}>
@@ -369,7 +369,7 @@ export default function Dashboard({ user }) {
                       </span>
                       <span className="candidate-contact-divider">•</span>
                       <span className="candidate-contact-item">
-                        <MessageSquare size={13} /> MAX: <em>{maxDisplay}</em>
+                        <MessageSquare size={13} /> Макс: <em>{maxDisplay}</em>
                       </span>
                       {app.created_at && (
                         <>
@@ -419,8 +419,8 @@ export default function Dashboard({ user }) {
         <div className="panel review-panel">
           <div className="section-head">
             <div>
-              <h2>Отклики волонтёров на мероприятия</h2>
-              <p className="muted">Студенты, подавшие заявку на участие в мероприятиях.</p>
+              <h2>Отклики медиаволонтёров на мероприятия</h2>
+              <p className="muted">Медиаволонтёры, подавшие заявку на участие в мероприятиях.</p>
             </div>
             <span className="badge status-applied">{data.pendingList.length} новых</span>
           </div>
@@ -474,7 +474,7 @@ export default function Dashboard({ user }) {
           {data.tasks && data.tasks.length > 0 ? (
             data.tasks.map((task) => <TaskCard key={task.id} task={task} isStaff />)
           ) : (
-            <Empty title="Нет мероприятий" text="Создайте первое мероприятие для команды волонтёров." />
+            <Empty title="Нет мероприятий" text="Создайте первое мероприятие для команды медиаволонтёров." />
           )}
         </div>
       </div>
@@ -506,12 +506,12 @@ export default function Dashboard({ user }) {
         <Modal
           isOpen={true}
           onClose={() => setAwardModalOpen(false)}
-          title="Начисление баллов волонтёру"
+          title="Начисление баллов медиаволонтёру"
           maxWidth="500px"
         >
           <form onSubmit={handleSubmitAward} className="modal-form">
             <div className="form-group">
-              <label>Выберите волонтёра *</label>
+              <label>Выберите медиаволонтёра *</label>
               <select
                 required
                 value={selectedStudentId}
@@ -519,7 +519,7 @@ export default function Dashboard({ user }) {
               >
                 {studentsList.map((st) => (
                   <option key={st.id} value={st.id}>
-                    {st.first_name} {st.last_name} ({st.group_name || 'Студент'}) — текущий баланс: {st.totalPoints || 0} б.
+                    {st.first_name} {st.last_name} ({st.group_name || 'Медиаволонтёр'}) — текущий баланс: {st.totalPoints || 0} б.
                   </option>
                 ))}
               </select>
@@ -527,12 +527,12 @@ export default function Dashboard({ user }) {
 
             <div className="form-grid-2">
               <div className="form-group">
-                <label>Количество баллов *</label>
+                <label>Количество баллов (до 100) *</label>
                 <input
                   type="number"
                   required
                   min="1"
-                  max="500"
+                  max="100"
                   value={awardPointsAmount}
                   onChange={(e) => setAwardPointsAmount(parseInt(e.target.value, 10) || 0)}
                 />

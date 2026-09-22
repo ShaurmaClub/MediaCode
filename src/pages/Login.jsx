@@ -6,7 +6,7 @@ import { Sparkles, ArrowRight, Shield, Camera, KeyRound, HelpCircle, X, Check } 
 import Modal from '../components/Modal.jsx';
 
 export default function Login({ onLogin }) {
-  const [form, setForm] = useState({ login: 'student', password: 'Demo123!' });
+  const [form, setForm] = useState({ login: '', password: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -42,7 +42,7 @@ export default function Login({ onLogin }) {
   const handleRequestReset = async (e) => {
     e.preventDefault();
     if (!resetContact.trim()) {
-      toast.error('Укажите ваш логин, телефон или контакт в MAX');
+      toast.error('Укажите ваш логин, телефон или контакт в Макс');
       return;
     }
 
@@ -61,24 +61,22 @@ export default function Login({ onLogin }) {
     }
   };
 
-  const setDemoUser = (login, roleLabel) => {
-    setForm({ login, password: 'Demo123!' });
-    setError('');
-    toast.info(`Выбран аккаунт: ${roleLabel} (${login})`);
-  };
-
   return (
     <div className="login-page">
       <div className="login-art">
         <div className="login-brand">
-          <img src="/mediacode-logo.png" alt="МедиаКод" className="brand-img-lg" />
+          <div className="login-brand-dual">
+            <img src="/brand/kait20.png" alt="КАИТ20" className="login-brand-kait" />
+            <div className="login-brand-divider" />
+            <img src="/brand/mediacode.png" alt="МедиаКод" className="login-brand-mediacode" />
+          </div>
           <span className="college-tag">Студенческий медиацентр</span>
         </div>
 
         <div className="login-quote">
           <h2>Пространство, где идеи превращаются в яркие медиаистории.</h2>
           <p>
-            Единая рабочая среда для фотографов, видеографов, авторов, дизайнеров и SMM-волонтёров колледжа.
+            Единая рабочая среда для фотографов, видеографов, авторов, дизайнеров и СММ медиаволонтёров колледжа.
             Участвуйте в съёмках, ведите учёт баллов и пополняйте своё портфолио.
           </p>
         </div>
@@ -86,7 +84,7 @@ export default function Login({ onLogin }) {
         <div className="login-art-pills">
           <div className="art-pill"><Camera size={15} /> <span>Фото и видео</span></div>
           <div className="art-pill"><Sparkles size={15} /> <span>Электронная зачётка</span></div>
-          <div className="art-pill"><Shield size={15} /> <span>Рейтинг волонтёров</span></div>
+          <div className="art-pill"><Shield size={15} /> <span>Рейтинг медиаволонтёров</span></div>
         </div>
 
         <div className="art-orb art-orb-1" />
@@ -112,7 +110,7 @@ export default function Login({ onLogin }) {
               autoFocus
               value={form.login}
               onChange={(e) => setForm({ ...form, login: e.target.value })}
-              placeholder="Например: student или staff"
+              placeholder="Введите ваш логин"
             />
           </div>
 
@@ -146,44 +144,11 @@ export default function Login({ onLogin }) {
             {!busy && <ArrowRight size={16} />}
           </button>
 
-          <div className="recruitment-join-hint" style={{ marginTop: '16px', textAlign: 'center', fontSize: '13px' }}>
-            <span className="muted">Хотите стать волонтёром? </span>
+          <div className="recruitment-join-hint" style={{ marginTop: '20px', textAlign: 'center', fontSize: '14px' }}>
+            <span className="muted">Хотите стать медиаволонтёром? </span>
             <Link to="/join" className="text-link" style={{ fontWeight: 600 }}>
               Подать заявку на отбор →
             </Link>
-          </div>
-
-          <div className="demo-users-box">
-            <div className="demo-users-title">Быстрый вход для тестирования:</div>
-            <div className="demo-users-grid">
-              <button
-                type="button"
-                className={`demo-pill ${form.login === 'student' ? 'active' : ''}`}
-                onClick={() => setDemoUser('student', 'Волонтёр')}
-              >
-                <b>student</b>
-                <small>Волонтёр (Иван)</small>
-              </button>
-              <button
-                type="button"
-                className={`demo-pill ${form.login === 'staff' ? 'active' : ''}`}
-                onClick={() => setDemoUser('staff', 'Куратор')}
-              >
-                <b>staff</b>
-                <small>Куратор (Алексей)</small>
-              </button>
-              <button
-                type="button"
-                className={`demo-pill ${form.login === 'admin' ? 'active' : ''}`}
-                onClick={() => setDemoUser('admin', 'Администратор')}
-              >
-                <b>admin</b>
-                <small>Администратор (Мария)</small>
-              </button>
-            </div>
-            <div className="demo-pass-hint">
-              Пароль для всех демо-пользователей: <code>Demo123!</code>
-            </div>
           </div>
         </form>
       </div>
@@ -213,10 +178,10 @@ export default function Login({ onLogin }) {
           ) : (
             <form onSubmit={handleRequestReset}>
               <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '16px' }}>
-                Укажите ваш логин, номер телефона или контакт в мессенджере MAX. Администратор или куратор медиацентра оперативно свяжется с вами для подтверждения личности и выдачи нового пароля.
+                Укажите ваш логин, номер телефона или контакт в мессенджере Макс. Администратор или сотрудник медиацентра оперативно свяжется с вами для подтверждения личности и выдачи нового пароля.
               </p>
               <div className="form-group">
-                <label>Логин, телефон или контакт в MAX *</label>
+                <label>Логин, телефон или контакт в Макс *</label>
                 <input
                   type="text"
                   required

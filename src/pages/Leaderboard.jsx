@@ -16,14 +16,14 @@ export default function Leaderboard({ user }) {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <Loader text="Загружаем рейтинг волонтёров…" />;
+  if (loading) return <Loader text="Загружаем рейтинг медиаволонтёров…" />;
 
   const top3 = rows.slice(0, 3);
   const rest = rows.slice(3);
 
   return (
     <Page
-      title="Рейтинг волонтёров медиацентра"
+      title="Рейтинг медиаволонтёров медиацентра"
       subtitle="Прозрачная система поощрения вклада студентов. Расти в рейтинге, создавай медиа и побеждай в сезоне!"
     >
       {/* Podium for Top 3 */}
@@ -32,7 +32,9 @@ export default function Leaderboard({ user }) {
           <div className="podium-grid">
             {/* 2nd place */}
             {top3[1] && (
-              <div className={`podium-card podium-rank-2 ${top3[1].id === user.id ? 'is-me' : ''}`}>
+              <div className={`podium-card podium-rank-2 ${top3[1].id === user.id ? 'is-me' : ''}`}
+                onClick={() => handleOpenProfile(top3[1])}
+              >
                 <div className="podium-medal-badge rank-2">
                   <Medal size={16} /> 2 место
                 </div>
@@ -40,7 +42,7 @@ export default function Leaderboard({ user }) {
                 <h3 className="podium-name">
                   {top3[1].first_name} {top3[1].last_name}
                 </h3>
-                <small className="muted">{top3[1].group_name || 'Волонтёр'}</small>
+                <small className="muted">{top3[1].group_name || 'Медиаволонтёр'}</small>
                 <div className="podium-score">
                   <strong>{top3[1].points}</strong> <small>баллов</small>
                 </div>
@@ -50,7 +52,9 @@ export default function Leaderboard({ user }) {
 
             {/* 1st place */}
             {top3[0] && (
-              <div className={`podium-card podium-rank-1 ${top3[0].id === user.id ? 'is-me' : ''}`}>
+              <div className={`podium-card podium-rank-1 ${top3[0].id === user.id ? 'is-me' : ''}`}
+                onClick={() => handleOpenProfile(top3[0])}
+              >
                 <div className="podium-crown">👑</div>
                 <div className="podium-medal-badge rank-1">
                   <Trophy size={16} /> 1 место
@@ -59,7 +63,7 @@ export default function Leaderboard({ user }) {
                 <h3 className="podium-name">
                   {top3[0].first_name} {top3[0].last_name}
                 </h3>
-                <small className="muted">{top3[0].group_name || 'Волонтёр'}</small>
+                <small className="muted">{top3[0].group_name || 'Медиаволонтёр'}</small>
                 <div className="podium-score gold">
                   <strong>{top3[0].points}</strong> <small>баллов</small>
                 </div>
@@ -69,7 +73,9 @@ export default function Leaderboard({ user }) {
 
             {/* 3rd place */}
             {top3[2] && (
-              <div className={`podium-card podium-rank-3 ${top3[2].id === user.id ? 'is-me' : ''}`}>
+              <div className={`podium-card podium-rank-3 ${top3[2].id === user.id ? 'is-me' : ''}`}
+                onClick={() => handleOpenProfile(top3[2])}
+              >
                 <div className="podium-medal-badge rank-3">
                   <Medal size={16} /> 3 место
                 </div>
@@ -77,7 +83,7 @@ export default function Leaderboard({ user }) {
                 <h3 className="podium-name">
                   {top3[2].first_name} {top3[2].last_name}
                 </h3>
-                <small className="muted">{top3[2].group_name || 'Волонтёр'}</small>
+                <small className="muted">{top3[2].group_name || 'Медиаволонтёр'}</small>
                 <div className="podium-score">
                   <strong>{top3[2].points}</strong> <small>баллов</small>
                 </div>
@@ -92,7 +98,7 @@ export default function Leaderboard({ user }) {
       <div className="panel leaderboard-panel">
         <div className="section-head">
           <h2>Таблица лидеров сезона</h2>
-          <span className="muted">Всего волонтёров: {rows.length}</span>
+          <span className="muted">Всего медиаволонтёров: {rows.length}</span>
         </div>
 
         <div className="table-responsive">
@@ -100,7 +106,7 @@ export default function Leaderboard({ user }) {
             <thead>
               <tr>
                 <th style={{ width: '60px' }}>Ранг</th>
-                <th>Студент</th>
+                <th>Медиаволонтёр</th>
                 <th>Группа / Курс</th>
                 <th>Навыки</th>
                 <th style={{ textAlign: 'center' }}>Завершено</th>
