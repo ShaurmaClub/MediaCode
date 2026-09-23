@@ -5,6 +5,23 @@ import { useToast } from '../context/ToastContext.jsx';
 import { Sparkles, ArrowRight, Shield, Camera, KeyRound, HelpCircle, X, Check, Eye, EyeOff } from 'lucide-react';
 import Modal from '../components/Modal.jsx';
 
+const formatPhone = (val) => {
+  let digits = val.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('8') || digits.startsWith('7')) {
+    digits = '7' + digits.slice(1);
+  } else if (digits.length > 0 && digits[0] !== '7') {
+    digits = '7' + digits;
+  }
+  digits = digits.slice(0, 11);
+  let formatted = '+7';
+  if (digits.length > 1) formatted += ' (' + digits.substring(1, 4);
+  if (digits.length >= 5) formatted += ') ' + digits.substring(4, 7);
+  if (digits.length >= 8) formatted += '-' + digits.substring(7, 9);
+  if (digits.length >= 10) formatted += '-' + digits.substring(9, 11);
+  return formatted;
+};
+
 export default function Login({ onLogin }) {
   const [form, setForm] = useState({ login: '', password: '' });
   const [activationMode, setActivationMode] = useState(false);
@@ -26,6 +43,10 @@ export default function Login({ onLogin }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loginMode === 'phone' && form.login.replace(/\D/g, '').length < 11) {
+      setError('Введите корректный номер телефона.');
+      return;
+    }
     if (!form.login || !form.password) {
       setError('Заполните логин/телефон и пароль');
       return;
@@ -222,10 +243,18 @@ export default function Login({ onLogin }) {
           {error && <div className="error-banner">{error}</div>}
 
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: 'var(--surface2)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
-              <button type="button" onClick={() => { setLoginMode('phone'); setForm({...form, login: ''}); }} className={`btn ${loginMode === 'phone' ? 'secondary' : 'ghost'}`} style={{ flex: 1, borderRadius: 'var(--radius-sm)' }}>
+              <button 
+                type="button" 
+                onClick={() => { setLoginMode('phone'); setForm({...form, login: ''}); }} 
+                className={`btn ${loginMode === 'phone' ? 'primary' : ''}`} 
+                style={{ flex: 1, borderRadius: 'var(--radius-sm)', background: loginMode === 'phone' ? 'var(--accent)' : 'transparent', color: loginMode === 'phone' ? '#ffffff' : 'var(--text)', border: 'none', boxShadow: loginMode === 'phone' ? '0 2px 8px rgba(109,74,255,0.3)' : 'none' }}>
                 По номеру телефона
               </button>
-              <button type="button" onClick={() => { setLoginMode('login'); setForm({...form, login: ''}); }} className={`btn ${loginMode === 'login' ? 'secondary' : 'ghost'}`} style={{ flex: 1, borderRadius: 'var(--radius-sm)' }}>
+              <button 
+                type="button" 
+                onClick={() => { setLoginMode('login'); setForm({...form, login: ''}); }} 
+                className={`btn ${loginMode === 'login' ? 'primary' : ''}`} 
+                style={{ flex: 1, borderRadius: 'var(--radius-sm)', background: loginMode === 'login' ? 'var(--accent)' : 'transparent', color: loginMode === 'login' ? '#ffffff' : 'var(--text)', border: 'none', boxShadow: loginMode === 'login' ? '0 2px 8px rgba(109,74,255,0.3)' : 'none' }}>
                 По логину
               </button>
             </div>
@@ -241,9 +270,7 @@ export default function Login({ onLogin }) {
                 onChange={(e) => {
                   let val = e.target.value;
                   if (loginMode === 'phone') {
-                    // We can just let them type, backend handles normalization
-                  } else {
-                    // Block pure numbers or phone-like inputs in login mode visually? User requested it.
+                    val = formatPhone(val);
                   }
                   setForm({ ...form, login: val });
                 }}

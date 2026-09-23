@@ -989,16 +989,8 @@ export default function PublicRecruitment() {
                           onChange={(e) => setConsent(e.target.checked)}
                         />
                         <span>
-                          Я даю согласие на{' '}
-                          <button
-                            type="button"
-                            className="text-link inline-policy-btn"
-                            onClick={() => setShowPrivacyModal(true)}
-                          >
-                            обработку персональных данных
-                          </button>{' '}
-                          в целях участия в конкурсном отборе медиацентра «МедиаКод» *
-                        </span>
+                            Я даю согласие на <a href="/privacy-policy" target="_blank" className="text-link inline-policy-btn" onClick={(e) => e.stopPropagation()}>обработку персональных данных</a> в целях участия в конкурсном отборе медиацентра «МедиаКод» *
+                          </span>
                       </label>
                     </div>
 
@@ -1019,53 +1011,6 @@ export default function PublicRecruitment() {
         )}
       </main>
 
-      {/* Privacy Policy Modal */}
-      {showPrivacyModal && (
-        <div className="privacy-modal-backdrop" onClick={() => setShowPrivacyModal(false)}>
-          <div className="privacy-modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="privacy-modal-header">
-              <ShieldCheck size={22} className="shield-icon" />
-              <h3>Согласие на обработку персональных данных</h3>
-              <button
-                type="button"
-                className="close-modal-btn"
-                onClick={() => setShowPrivacyModal(false)}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="privacy-modal-body">
-              <p>
-                <strong>1. Цель обработки данных</strong>
-                <br />
-                Предоставленные персональные данные (ФИО, учебная группа, контактный телефон, номер телефона в мессенджере Макс, ссылки на материалы и портфолио) обрабатываются исключительно в целях организации конкурсного отбора медиаволонтёров в студенческий медиацентр «МедиаКод».
-              </p>
-              <p>
-                <strong>2. Конфиденциальность и безопасность</strong>
-                <br />
-                Все полученные сведения хранятся во внутреннем контуре системы медиацентра, доступны только авторизованным сотрудникам и администраторам и не передаются третьим лицам.
-              </p>
-              <p>
-                <strong>3. Связь с кандидатом</strong>
-                <br />
-                Номер телефона и контакт Макс используются сотрудниками медиацентра для оперативной связи, информирования о результатах рассмотрения тестового задания и координации дальнейших встреч.
-              </p>
-            </div>
-            <div className="privacy-modal-footer">
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  setConsent(true);
-                  setShowPrivacyModal(false);
-                }}
-              >
-                Принять и продолжить
-              </button>
-            </div>
           </div>
-        </div>
-      )}
-    </div>
   );
 }

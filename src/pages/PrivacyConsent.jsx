@@ -44,16 +44,19 @@ export default function PrivacyConsent({ user, onConsented }) {
           {error && <div className="error-banner">{error}</div>}
 
           <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', marginBottom: '24px' }}>
-            <label className="checkbox-label" style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', margin: 0 }}>
+            <label style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '12px', alignItems: 'start', cursor: 'pointer', margin: 0 }}>
               <input
                 type="checkbox"
                 checked={checked}
                 onChange={e => setChecked(e.target.checked)}
-                style={{ marginTop: '2px' }}
+                style={{ marginTop: '3px' }}
               />
-              <span style={{ fontSize: '13px', lineHeight: 1.5, fontWeight: 500 }}>
-                Я даю <a href="/privacy.pdf" target="_blank" className="text-link" onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы личного кабинета медиаволонтёра.
-              </span>
+              <div style={{ fontSize: '14px', lineHeight: 1.4, fontWeight: 500 }}>
+                Я даю согласие на <a href="/privacy-policy" className="text-link" onClick={e => e.stopPropagation()}>обработку персональных данных</a>
+                <div className="muted" style={{ fontSize: '12px', marginTop: '6px', fontWeight: 400 }}>
+                  Согласие требуется для работы личного кабинета медиаволонтёра.
+                </div>
+              </div>
             </label>
           </div>
 

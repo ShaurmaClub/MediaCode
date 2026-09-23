@@ -17,6 +17,7 @@ function tSkill(s) {
 }
 
 import {
+  CheckCircle,
   Search,
   Award,
   BookOpen,
@@ -31,7 +32,7 @@ import {
   Clock,
   ArrowUpRight
 } from 'lucide-react';
-import { api, formatDate, relativeTime } from '../api.js';
+import { api, formatDate, relativeTime, formatDateTime } from '../api.js';
 import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -467,6 +468,15 @@ export default function Students({ user }) {
                     </div>
                   )}
 
+                  {(user.role === 'ADMIN' || user.role === 'STAFF') && studentDetails.user.privacy_consent_at && (
+                    <div className="profile-modal-section" style={{ background: 'var(--surface2)', padding: '16px', borderRadius: 'var(--radius-md)', marginBottom: '16px' }}>
+                      <h4 style={{ marginBottom: '8px' }}>Согласие для личного кабинета</h4>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)' }}>
+                        <CheckCircle size={16} />
+                        <span style={{ fontSize: '14px', fontWeight: 500 }}>Подтверждено {formatDateTime(studentDetails.user.privacy_consent_at)}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="profile-modal-section">
                     <h4>Специализация и навыки:</h4>
                     <div className="skill-tags">

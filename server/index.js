@@ -216,7 +216,11 @@ export function getHumanReadableAudit(action, actorName, entityType, entityId, m
     case 'LOGIN_FAILED':
       return `Неудачная попытка входа с логином «${meta.login || 'неизвестно'}»`;
     case 'LOGOUT':
-      return `${actor} вышел из системы`;
+        return `${actor} вышел из системы`;
+      case 'PRIVACY_CONSENT_RECRUITMENT':
+        return 'Подтверждено согласие на обработку персональных данных при подаче заявки';
+      case 'PRIVACY_CONSENT_ACCOUNT':
+        return 'Подтверждено согласие на обработку персональных данных для личного кабинета';
     case 'LOGIN_CHANGED':
       return `${actor} изменил логин на @${meta.new_login || ''}`;
     case 'TASK_CREATED':
@@ -448,8 +452,8 @@ app.post('/api/auth/privacy-consent', auth, (req, res) => {
     return res.status(400).json({ error: 'Требуется версия политики' });
   }
   
-  db.prepare("UPDATE users SET privacy_consent_at = CURRENT_TIMESTAMP, privacy_policy_version = ? WHERE id = ?").run(consent_version, req.user.id);
-  audit(req.user.id, 'PRIVACY_CONSENT', 'AUTH', req.user.id, { version: consent_version });
+  db.prepare("UPDATE users SET privacy_consent_at = CURRENT_TIMESTAMP, privacy_policy_version = ?, privacy_consent_source = 'account' WHERE id = ?").run(consent_version, req.user.id);
+  audit(req.user.id, 'PRIVACY_CONSENT_ACCOUNT', 'AUTH', req.user.id, { version: consent_version });
   
   const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json({ ok: true, user: safeUser(updated) });
@@ -1041,8 +1045,8 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
         const r = db.prepare(`
           INSERT INTO recruitment_applications (
             public_id, track_id, full_name, department, group_name, phone, max_contact,
-            portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', '1.0', CURRENT_TIMESTAMP)
+            portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, privacy_consent_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', 'draft-2026-09', CURRENT_TIMESTAMP, 'recruitment')
         `).run(
           publicId,
           track.id,

@@ -7,6 +7,7 @@ import Shell from './components/Shell.jsx';
 import Login from './pages/Login.jsx';
 import FirstLogin from './pages/FirstLogin.jsx';
 import PrivacyConsent from './pages/PrivacyConsent.jsx';
+import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Tasks from './pages/Tasks.jsx';
 import TaskDetail from './pages/TaskDetail.jsx';
@@ -88,6 +89,7 @@ function App() {
       <Routes>
         <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
         <Route path="/join" element={<PublicRecruitment />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route
           path="*"
           element={isRecruitmentSubdomain() ? <PublicRecruitment /> : <Login onLogin={setUser} />}
@@ -127,6 +129,7 @@ function App() {
         {/* Public recruitment preview route */}
         <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
         <Route path="/join" element={<PublicRecruitment />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
 
         {/* Recruitment Applications Review (Staff & Admin) */}
         <Route
