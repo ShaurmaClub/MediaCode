@@ -402,6 +402,11 @@ a {
   letter-spacing: 0.5px;
 }
 
+.app.collapsed .profile-mini {
+  justify-content: center;
+  padding: 10px 0;
+}
+
 .app.collapsed .profile-mini-info {
   display: none;
 }
@@ -667,7 +672,6 @@ a {
 /* Content Area */
 .content {
   padding: 36px;
-  max-width: 1400px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -3797,34 +3801,21 @@ a {
   border-color: var(--accent);
 }
 
-/* Max Phone Check Card */
+/* Max Phone Check inline string */
 .max-phone-check-card {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  align-items: center;
+  gap: 8px;
   margin-top: 10px;
   cursor: pointer;
-  transition: all 0.15s ease;
   user-select: none;
 }
 
-.max-phone-check-card:hover {
-  border-color: var(--accent);
-  background: var(--surface2);
-}
-
-.max-phone-check-card.active {
-  border-color: var(--accent);
-  background: rgba(124, 77, 255, 0.05);
-}
-
 .max-phone-check-card input[type="checkbox"] {
-  margin-top: 3px;
+  width: 18px;
+  height: 18px;
   cursor: pointer;
+  margin: 0;
 }
 
 .max-phone-check-info {
@@ -3835,7 +3826,7 @@ a {
 
 .max-phone-check-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text);
   cursor: pointer;
 }
@@ -3843,7 +3834,6 @@ a {
 .max-phone-check-sub {
   font-size: 11.5px;
   color: var(--text-secondary);
-  line-height: 1.35;
 }
 
 /* Submission Method Toggle */

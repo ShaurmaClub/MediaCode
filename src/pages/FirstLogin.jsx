@@ -52,7 +52,7 @@ export default function FirstLogin({ user, onPasswordChanged }) {
       <div className="login-art">
         <div className="login-brand">
           <div className="login-brand-dual">
-            <img src="/brand/kait20.png" alt="КАИТ20" className="login-brand-kait" />
+            <img src="/brand/kait20-white.png" alt="КАИТ20" className="login-brand-kait" />
             <div className="login-brand-divider" />
             <img src="/brand/mediacode.png" alt="МедиаКод" className="login-brand-mediacode" />
           </div>

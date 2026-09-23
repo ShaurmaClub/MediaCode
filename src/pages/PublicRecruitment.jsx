@@ -425,7 +425,7 @@ export default function PublicRecruitment() {
         <div className="public-header-inner">
           <Link to="/" className="public-brand" title="КАИТ20 · МедиаКод">
             <div className="public-brand-dual">
-              <img src="/brand/kait20.png" alt="КАИТ20" className="public-brand-kait" />
+              <img src="/brand/kait20-white.png" alt="КАИТ20" className="public-brand-kait" />
               <div className="public-brand-divider" />
               <img src="/brand/mediacode.png" alt="МедиаКод" className="public-brand-mediacode" />
             </div>
