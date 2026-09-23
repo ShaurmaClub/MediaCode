@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, ArrowRight, Check } from 'lucide-react';
 import { api } from '../api.js';
 
-export default function PrivacyConsent({ user, onConsented }) {
+export default function PrivacyConsent({ user, onConsented, onLogout }) {
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -25,6 +25,15 @@ export default function PrivacyConsent({ user, onConsented }) {
       setError(err.message);
       setBusy(false);
     }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await api('/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+    }
+    if (onLogout) onLogout();
   };
 
   return (
@@ -60,10 +69,15 @@ export default function PrivacyConsent({ user, onConsented }) {
             </label>
           </div>
 
-          <button type="submit" className="btn primary wide" disabled={busy}>
-            {busy ? 'Сохраняем…' : 'Подтвердить и продолжить'}
-            {!busy && <ArrowRight size={16} />}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button type="submit" className="btn primary wide" disabled={busy}>
+              {busy ? 'Сохраняем…' : 'Подтвердить и продолжить'}
+              {!busy && <ArrowRight size={16} />}
+            </button>
+            <button type="button" className="btn ghost wide" onClick={handleLogout} disabled={busy}>
+              Выйти из аккаунта
+            </button>
+          </div>
         </form>
       </div>
     </div>

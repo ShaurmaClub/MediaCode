@@ -132,5 +132,28 @@ describe('Privacy and Phone Logic Tests', () => {
     const stuLogin = await apiCall('POST', '/auth/login', { login: 'student', password: 'Demo123!' });
     const stuApp = await apiCall('GET', `/recruitment/applications/${appId}`, null, stuLogin.cookie);
     assert.equal(stuApp.status, 403);
+  
+  test('16. User without consent can logout successfully and loses session', async () => {
+    // Temporarily revert consent
+    const db = (await import('../server/db.js')).default;
+    db.prepare("UPDATE users SET privacy_consent_at = NULL WHERE login = 'student'").run();
+
+    // Login
+    const loginRes = await apiCall('POST', '/auth/login', { login: 'student', password: 'Demo123!' });
+    const studentCookie = loginRes.cookie;
+    
+    // Check dashboard blocked
+    const dash = await apiCall('GET', '/dashboard', null, studentCookie);
+    assert.equal(dash.status, 403);
+
+    // Logout
+    const logoutRes = await apiCall('POST', '/auth/logout', null, studentCookie);
+    assert.equal(logoutRes.status, 200);
+
+    // Dashboard completely 401 now
+    const dashAfter = await apiCall('GET', '/dashboard', null, studentCookie);
+    assert.equal(dashAfter.status, 401);
   });
+});
+
 });

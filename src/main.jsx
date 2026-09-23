@@ -104,6 +104,7 @@ function App() {
       <FirstLogin
         user={user}
         onPasswordChanged={(updatedUser) => setUser(updatedUser)}
+        onLogout={() => setUser(null)}
       />
     );
   }
@@ -113,6 +114,7 @@ function App() {
       <PrivacyConsent
         user={user}
         onConsented={(updatedUser) => setUser(updatedUser)}
+        onLogout={() => setUser(null)}
       />
     );
   }

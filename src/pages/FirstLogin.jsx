@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useToast } from '../context/ToastContext.jsx';
 import { KeyRound, User, Lock, AlertCircle, CheckCircle2, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
-export default function FirstLogin({ user, onPasswordChanged }) {
+export default function FirstLogin({ user, onPasswordChanged, onLogout }) {
   const [login, setLogin] = useState(user.login || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -12,6 +12,16 @@ export default function FirstLogin({ user, onPasswordChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const toast = useToast();
+
+
+  const handleLogout = async () => {
+    try {
+      await api('/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+    }
+    if (onLogout) onLogout();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
