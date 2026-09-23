@@ -681,6 +681,17 @@ function normalizeRussianPhone(rawPhone) {
   return `+${d}`;
 }
 
+// Yandex Disk URL validation helper (supports disk.yandex.ru, disk.360.yandex.ru, yadi.sk)
+export function isValidYandexDiskLink(url) {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return (
+    /^https?:\/\/(disk\.)?(360\.)?yandex\.(ru|com|by|kz)\//i.test(trimmed) ||
+    /^https?:\/\/disk\.360\.yandex\.(ru|com|by|kz)\//i.test(trimmed) ||
+    /^https?:\/\/yadi\.sk\//i.test(trimmed)
+  );
+}
+
 // Public application submission (NO AUTH REQUIRED)
 app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, res) => {
   const uploadFields = uploadMiddleware.fields([
@@ -770,6 +781,15 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
       return res.status(400).json({ error: 'Необходимо подтвердить согласие на обработку персональных данных' });
     }
 
+    if (portfolio_url && String(portfolio_url).trim().length > 0) {
+      if (!isValidYandexDiskLink(portfolio_url)) {
+        cleanupFiles();
+        return res.status(400).json({
+          error: 'Укажите корректную ссылку на портфолио в Яндекс Диске (https://disk.yandex.ru/... или https://disk.360.yandex.ru/...)'
+        });
+      }
+    }
+
     // Track-specific submissions validation
     const trackSlug = (track.slug || '').toLowerCase();
     const trackType = (track.type || '').toUpperCase();
@@ -810,12 +830,10 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
           });
         }
       } else if (hasYandexLink) {
-        const trimmed = String(submission_url).trim();
-        const isYandex = /^https?:\/\/(disk\.)?yandex\.(ru|com|by|kz)\//i.test(trimmed) || trimmed.startsWith('https://yadi.sk/');
-        if (!isYandex) {
+        if (!isValidYandexDiskLink(submission_url)) {
           cleanupFiles();
           return res.status(400).json({
-            error: 'Укажите корректную ссылку на Яндекс Диск (https://disk.yandex.ru/...)'
+            error: 'Укажите корректную ссылку на Яндекс Диск (https://disk.yandex.ru/... или https://disk.360.yandex.ru/...)'
           });
         }
       }
@@ -829,6 +847,12 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
           error: 'Введите ответ на тестовое задание в текстовое поле или прикрепите ссылку на Яндекс Диск'
         });
       }
+      if (hasLink && !isValidYandexDiskLink(submission_url)) {
+        cleanupFiles();
+        return res.status(400).json({
+          error: 'Укажите корректную ссылку на Яндекс Диск (https://disk.yandex.ru/... или https://disk.360.yandex.ru/...)'
+        });
+      }
     } else {
       // Video, Montage, Design, Content: file upload or cloud disk link
       const hasFiles = uploadedFiles.length > 0;
@@ -837,6 +861,12 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
         cleanupFiles();
         return res.status(400).json({
           error: 'Прикрепите файл с выполненным заданием или укажите ссылку на Яндекс Диск'
+        });
+      }
+      if (hasLink && !isValidYandexDiskLink(submission_url)) {
+        cleanupFiles();
+        return res.status(400).json({
+          error: 'Укажите корректную ссылку на Яндекс Диск (https://disk.yandex.ru/... или https://disk.360.yandex.ru/...)'
         });
       }
     }

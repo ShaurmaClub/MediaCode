@@ -3789,6 +3789,96 @@ a {
   border-color: var(--accent);
 }
 
+/* Max Phone Check Card */
+.max-phone-check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.max-phone-check-card:hover {
+  border-color: var(--accent);
+  background: var(--surface2);
+}
+
+.max-phone-check-card.active {
+  border-color: var(--accent);
+  background: rgba(124, 77, 255, 0.05);
+}
+
+.max-phone-check-card input[type="checkbox"] {
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+.max-phone-check-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.max-phone-check-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.max-phone-check-sub {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+/* Submission Method Toggle */
+.submission-method-toggle {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 16px;
+  background: var(--surface);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.submission-method-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.submission-method-btn:hover {
+  color: var(--text);
+  background: var(--surface2);
+}
+
+.submission-method-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
 /* Materials Upload Box */
 .materials-upload-box {
   background: var(--surface2);

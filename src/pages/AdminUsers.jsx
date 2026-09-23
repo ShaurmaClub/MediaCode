@@ -432,7 +432,7 @@ export default function AdminUsers({ currentUser }) {
                 <label>Группа</label>
                 <input
                   type="text"
-                  placeholder="медиа-21"
+                  placeholder="Например: ИБС111"
                   value={createForm.group_name}
                   onChange={(e) => setCreateForm({ ...createForm, group_name: e.target.value })}
                 />
@@ -575,6 +575,7 @@ export default function AdminUsers({ currentUser }) {
                 <label>Группа</label>
                 <input
                   type="text"
+                  placeholder="Например: ИБС111"
                   value={editUser.group_name || ''}
                   onChange={(e) => setEditUser({ ...editUser, group_name: e.target.value })}
                 />

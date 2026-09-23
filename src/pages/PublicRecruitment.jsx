@@ -31,6 +31,48 @@ import { Loader } from '../components/UI.jsx';
 import { RECRUITMENT_TRACKS, TRACK_ICONS } from '../config/recruitmentTracks.js';
 import { DEPARTMENTS } from '../config/departments.js';
 
+export const isValidYandexDiskLink = (url) => {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return (
+    /^https?:\/\/(disk\.)?(360\.)?yandex\.(ru|com|by|kz)\//i.test(trimmed) ||
+    /^https?:\/\/disk\.360\.yandex\.(ru|com|by|kz)\//i.test(trimmed) ||
+    /^https?:\/\/yadi\.sk\//i.test(trimmed)
+  );
+};
+
+const SUBMISSION_METHODS = {
+  photo: [
+    { id: 'files', label: 'Загрузить 10 JPEG на сайт', icon: UploadCloud },
+    { id: 'link', label: 'Ссылка на Яндекс Диск', icon: LinkIcon }
+  ],
+  video: [
+    { id: 'files', label: 'Загрузить видео', icon: UploadCloud },
+    { id: 'link', label: 'Ссылка на Яндекс Диск', icon: LinkIcon }
+  ],
+  montage: [
+    { id: 'files', label: 'Загрузить готовое видео', icon: UploadCloud },
+    { id: 'link', label: 'Ссылка на Яндекс Диск', icon: LinkIcon }
+  ],
+  design: [
+    { id: 'files', label: 'Загрузить макет', icon: UploadCloud },
+    { id: 'link', label: 'Ссылка на Яндекс Диск', icon: LinkIcon }
+  ],
+  smm: [
+    { id: 'text', label: 'Ответить прямо в форме', icon: FileText },
+    { id: 'link', label: 'Ссылка на Яндекс Документ', icon: LinkIcon }
+  ],
+  content: [
+    { id: 'files', label: 'Загрузить видео', icon: UploadCloud },
+    { id: 'link', label: 'Ссылка на Яндекс Диск', icon: LinkIcon }
+  ]
+};
+
+const DEFAULT_SUBMISSION_METHODS = [
+  { id: 'files', label: 'Загрузить файлы', icon: UploadCloud },
+  { id: 'link', label: 'Ссылка на Яндекс Диск', icon: LinkIcon }
+];
+
 export default function PublicRecruitment() {
   const params = useParams();
   const navigate = useNavigate();
@@ -71,8 +113,17 @@ export default function PublicRecruitment() {
   const [submissionText, setSubmissionText] = useState('');
   const [comment, setComment] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
-  const [photoMode, setPhotoMode] = useState('files'); // 'files' | 'link'
+  const [submissionMethod, setSubmissionMethod] = useState(
+    effectiveSlug === 'smm' ? 'text' : 'files'
+  );
   const [consent, setConsent] = useState(false);
+
+  useEffect(() => {
+    setSubmissionMethod(effectiveSlug === 'smm' ? 'text' : 'files');
+    setSelectedFiles([]);
+    setSubmissionUrl('');
+    setSubmissionText('');
+  }, [effectiveSlug]);
 
   // Load track info when effectiveSlug is defined
   useEffect(() => {
@@ -234,17 +285,23 @@ export default function PublicRecruitment() {
       return;
     }
 
-    // 6. Track-specific submission validation
-    if (effectiveSlug === 'photo') {
-      const isYandex = submissionUrl.trim().startsWith('https://disk.yandex.ru/') || submissionUrl.trim().startsWith('https://yadi.sk/');
-      if (photoMode === 'link' || (!selectedFiles.length && submissionUrl.trim())) {
-        if (!isYandex) {
-          setErrorMessage('Для направления Фотография укажите корректную ссылку на папку в Яндекс Диске (https://disk.yandex.ru/... или https://yadi.sk/...)');
-          return;
-        }
-      } else {
+    // 5. Portfolio validation (if provided, must be Yandex Disk)
+    if (portfolioUrl.trim()) {
+      if (!isValidYandexDiskLink(portfolioUrl.trim())) {
+        setErrorMessage('Укажите корректную ссылку на портфолио в Яндекс Диске (https://disk.yandex.ru/... или https://disk.360.yandex.ru/...)');
+        return;
+      }
+    }
+
+    // 6. Track-specific submission validation according to chosen submission method
+    let filesToSend = [];
+    let urlToSend = '';
+    let textToSend = submissionText.trim();
+
+    if (submissionMethod === 'files') {
+      if (effectiveSlug === 'photo') {
         if (selectedFiles.length !== 10) {
-          setErrorMessage('Для направления Фотография прикрепите ровно 10 фотографий JPEG или переключитесь на отправку ссылки на Яндекс Диск');
+          setErrorMessage('Для направления Фотография требуется прикрепить ровно 10 фотографий JPEG или переключитесь на отправку ссылки на Яндекс Диск');
           return;
         }
         const allJpegs = selectedFiles.every((f) => {
@@ -257,15 +314,26 @@ export default function PublicRecruitment() {
           setErrorMessage('Все 10 файлов должны быть фотографиями в формате JPEG (.jpg / .jpeg)');
           return;
         }
+      } else {
+        if (selectedFiles.length === 0) {
+          setErrorMessage('Прикрепите файл с выполненным заданием или переключитесь на ссылку на Яндекс Диск');
+          return;
+        }
       }
-    } else if (effectiveSlug === 'smm') {
-      if (!submissionText.trim() && !submissionUrl.trim()) {
-        setErrorMessage('Введите ответ на тестовое задание в текстовое поле или прикрепите ссылку на Яндекс Диск');
+      filesToSend = selectedFiles;
+    } else if (submissionMethod === 'link') {
+      if (!submissionUrl.trim()) {
+        setErrorMessage('Укажите ссылку на выполненное задание на Яндекс Диске');
         return;
       }
-    } else {
-      if (selectedFiles.length === 0 && !submissionUrl.trim()) {
-        setErrorMessage('Прикрепите файл с выполненным заданием или укажите ссылку на Яндекс Диск');
+      if (!isValidYandexDiskLink(submissionUrl.trim())) {
+        setErrorMessage('Укажите корректную ссылку на Яндекс Диск (https://disk.yandex.ru/... или https://disk.360.yandex.ru/...)');
+        return;
+      }
+      urlToSend = submissionUrl.trim();
+    } else if (submissionMethod === 'text') {
+      if (!textToSend) {
+        setErrorMessage('Введите ответ на тестовое задание в текстовое поле');
         return;
       }
     }
@@ -278,12 +346,12 @@ export default function PublicRecruitment() {
     formData.append('phone', phone.trim());
     formData.append('phone_is_max', phoneIsMax ? 'true' : 'false');
     formData.append('portfolio_url', portfolioUrl.trim());
-    formData.append('submission_url', submissionUrl.trim());
-    formData.append('submission_text', submissionText.trim());
+    formData.append('submission_url', urlToSend);
+    formData.append('submission_text', textToSend);
     formData.append('comment', comment.trim());
     formData.append('consent', 'true');
 
-    for (const file of selectedFiles) {
+    for (const file of filesToSend) {
       formData.append('files', file);
     }
 
@@ -303,9 +371,9 @@ export default function PublicRecruitment() {
         fullName: fullName.trim(),
         phone: phone.trim(),
         phoneIsMax,
-        filesCount: selectedFiles.length,
-        hasText: Boolean(submissionText.trim()),
-        hasLink: Boolean(submissionUrl.trim())
+        filesCount: filesToSend.length,
+        hasText: Boolean(textToSend),
+        hasLink: Boolean(urlToSend)
       });
     } catch (err) {
       setErrorMessage(err.message);
@@ -333,6 +401,7 @@ export default function PublicRecruitment() {
     setSubmissionText('');
     setComment('');
     setSelectedFiles([]);
+    setSubmissionMethod(effectiveSlug === 'smm' ? 'text' : 'files');
     setConsent(false);
     setErrorMessage('');
   };
@@ -625,10 +694,13 @@ export default function PublicRecruitment() {
                           id="groupName"
                           type="text"
                           required
-                          placeholder="ИБС 111"
+                          placeholder="Например: ИБС111"
                           value={groupName}
                           onChange={(e) => setGroupName(e.target.value)}
                         />
+                        <small className="muted" style={{ display: 'block', marginTop: '4px', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                          Укажите свою настоящую учебную группу.
+                        </small>
                       </div>
                     </div>
 
@@ -646,25 +718,34 @@ export default function PublicRecruitment() {
                       <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                         Номер телефона будет использоваться сотрудниками медиацентра для оперативной связи во время мероприятий
                       </small>
-                      <label
-                        className="checkbox-label"
-                        style={{
-                          marginTop: '8px',
-                          fontSize: '12.5px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          whiteSpace: 'nowrap'
+                      <div
+                        className={`max-phone-check-card ${phoneIsMax ? 'active' : ''}`}
+                        onClick={() => setPhoneIsMax(!phoneIsMax)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            setPhoneIsMax(!phoneIsMax);
+                          }
                         }}
                       >
                         <input
                           type="checkbox"
+                          id="phoneIsMax"
                           checked={phoneIsMax}
                           onChange={(e) => setPhoneIsMax(e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
                         />
-                        <span>Этот номер телефона используется в Макс</span>
-                      </label>
+                        <div className="max-phone-check-info">
+                          <label htmlFor="phoneIsMax" className="max-phone-check-title" onClick={(e) => e.stopPropagation()}>
+                            Этот номер телефона используется в Макс
+                          </label>
+                          <span className="max-phone-check-sub">
+                            Если ваш Макс зарегистрирован на этот же номер, отметьте этот пункт.
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Portfolio URL: strictly Yandex Disk */}
@@ -690,61 +771,38 @@ export default function PublicRecruitment() {
                             : 'Материалы выполненного задания *'}
                         </label>
                         <span className="muted" style={{ fontSize: '12px' }}>
-                          {effectiveSlug === 'photo'
-                            ? (photoMode === 'files' ? 'Ровно 10 файлов JPEG' : 'Ссылка на Яндекс Диск')
-                            : effectiveSlug === 'smm'
-                            ? 'Текст задания или Яндекс Диск'
-                            : 'Файл или Яндекс Диск'}
+                          {submissionMethod === 'files'
+                            ? (effectiveSlug === 'photo' ? 'Ровно 10 файлов JPEG' : 'Загрузка файла на сайт')
+                            : submissionMethod === 'text'
+                            ? 'Текст задания в форме'
+                            : 'Ссылка на Яндекс Диск'}
                         </span>
                       </div>
 
-                      {/* Photo mode toggle */}
-                      {effectiveSlug === 'photo' && (
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', background: 'var(--surface2)', padding: '4px', borderRadius: 'var(--radius-sm)' }}>
-                          <button
-                            type="button"
-                            className={`btn sm ${photoMode === 'files' ? 'primary' : 'ghost'}`}
-                            style={{ flex: 1 }}
-                            onClick={() => setPhotoMode('files')}
-                          >
-                            Загрузить 10 JPEG на сайт
-                          </button>
-                          <button
-                            type="button"
-                            className={`btn sm ${photoMode === 'link' ? 'primary' : 'ghost'}`}
-                            style={{ flex: 1 }}
-                            onClick={() => setPhotoMode('link')}
-                          >
-                            Ссылка на Яндекс Диск
-                          </button>
-                        </div>
-                      )}
+                      {/* Method selector toggle */}
+                      <div className="submission-method-toggle">
+                        {(SUBMISSION_METHODS[effectiveSlug] || DEFAULT_SUBMISSION_METHODS).map((m) => {
+                          const Icon = m.icon;
+                          const isActive = submissionMethod === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              className={`submission-method-btn ${isActive ? 'active' : ''}`}
+                              onClick={() => {
+                                setSubmissionMethod(m.id);
+                                setErrorMessage('');
+                              }}
+                            >
+                              <Icon size={14} />
+                              <span>{m.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                      {/* Photo: Yandex Disk mode */}
-                      {effectiveSlug === 'photo' && photoMode === 'link' && (
-                        <div className="form-group" style={{ marginTop: '14px' }}>
-                          <label htmlFor="submissionUrl" style={{ fontSize: '13px', fontWeight: 600 }}>
-                            Ссылка на папку с 10 фото на Яндекс Диске *
-                          </label>
-                          <div className="url-input-wrap">
-                            <LinkIcon size={16} className="url-icon" />
-                            <input
-                              id="submissionUrl"
-                              type="url"
-                              required
-                              placeholder="https://disk.yandex.ru/d/..."
-                              value={submissionUrl}
-                              onChange={(e) => setSubmissionUrl(e.target.value)}
-                            />
-                          </div>
-                          <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '11.5px', lineHeight: 1.4 }}>
-                            Загрузите ровно 10 отобранных кадров в папку на Яндекс Диске и вставьте публичную ссылку с открытым доступом.
-                          </small>
-                        </div>
-                      )}
-
-                      {/* SMM: Primary Large Textarea */}
-                      {effectiveSlug === 'smm' && (
+                      {/* SMM: Primary Large Textarea (shown ONLY when method is 'text') */}
+                      {effectiveSlug === 'smm' && submissionMethod === 'text' && (
                         <div className="form-group" style={{ marginTop: '12px' }}>
                           <label htmlFor="submissionText" style={{ fontSize: '13px', fontWeight: 600 }}>
                             Ответ на тестовое задание *
@@ -754,7 +812,7 @@ export default function PublicRecruitment() {
                             rows="12"
                             className="submission-textarea"
                             style={{ fontFamily: 'inherit', lineHeight: 1.5, whiteSpace: 'pre-wrap', resize: 'vertical' }}
-                            placeholder="1. Встреча со студенческими организациями и клубами:&#10;План взаимодействия со студсоветом...&#10;&#10;2. Визуальная концепция и Tone of Voice...&#10;&#10;3. Исправление неудачного поста...&#10;&#10;4. Освещение события: 10 лучших фото и 3 видеоролика...&#10;&#10;5. Интерактив для Telegram-канала..."
+                            placeholder="1. Взаимодействие со студенческими организациями и клубами:&#10;План сбора инфоповодов...&#10;&#10;2. Визуальная концепция и стиль общения официального Телеграм-канала...&#10;&#10;3. Исправление неудачного поста...&#10;&#10;4. Освещение события: 10 лучших фото и 3 видеоролика...&#10;&#10;5. Интерактив и вовлечение для Телеграм-канала..."
                             value={submissionText}
                             onChange={(e) => setSubmissionText(e.target.value)}
                           />
@@ -765,27 +823,8 @@ export default function PublicRecruitment() {
                         </div>
                       )}
 
-                      {/* Montage raw materials alert/button */}
-                      {effectiveSlug === 'montage' && trackData.materials_url && (
-                        <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-                          <div>
-                            <strong style={{ fontSize: '13px', display: 'block' }}>Исходные материалы для монтажа:</strong>
-                            <small className="muted" style={{ fontSize: '11px' }}>Скачайте архив с видеоматериалами для выполнения задания</small>
-                          </div>
-                          <a
-                            href={trackData.materials_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn tiny primary"
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                          >
-                            <ExternalLink size={13} /> Скачать архив с исходными материалами
-                          </a>
-                        </div>
-                      )}
-
-                      {/* File Upload Dropzone (NOT primary for SMM; conditional for Photo) */}
-                      {effectiveSlug !== 'smm' && (effectiveSlug !== 'photo' || photoMode === 'files') && (
+                      {/* File Upload Dropzone (shown ONLY when method is 'files') */}
+                      {submissionMethod === 'files' && (
                         <div className="upload-block" style={{ marginTop: '14px' }}>
                           <div
                             className="multi-file-dropzone"
@@ -846,66 +885,49 @@ export default function PublicRecruitment() {
                         </div>
                       )}
 
-                      {/* SMM: Optional document link or file */}
-                      {effectiveSlug === 'smm' && (
+                      {/* Yandex Link Input (shown ONLY when method is 'link') */}
+                      {submissionMethod === 'link' && (
                         <div className="form-group" style={{ marginTop: '14px' }}>
-                          <label htmlFor="submissionUrl" style={{ fontSize: '12px', fontWeight: 600 }}>
-                            Ссылка на документ в Яндекс Диске (необязательно)
+                          <label htmlFor="submissionUrl" style={{ fontSize: '13px', fontWeight: 600 }}>
+                            {effectiveSlug === 'photo'
+                              ? 'Ссылка на папку с 10 фото на Яндекс Диске *'
+                              : effectiveSlug === 'smm'
+                              ? 'Ссылка на Яндекс Документ или папку на Яндекс Диске *'
+                              : effectiveSlug === 'design'
+                              ? 'Ссылка на папку с макетом на Яндекс Диске *'
+                              : 'Ссылка на видео на Яндекс Диске *'}
                           </label>
                           <div className="url-input-wrap">
                             <LinkIcon size={16} className="url-icon" />
                             <input
                               id="submissionUrl"
                               type="url"
-                              placeholder="https://disk.yandex.ru/..."
+                              required
+                              placeholder={effectiveSlug === 'photo' ? 'https://disk.yandex.ru/d/...' : 'https://disk.yandex.ru/...'}
                               value={submissionUrl}
                               onChange={(e) => setSubmissionUrl(e.target.value)}
                             />
                           </div>
-                          <small className="muted" style={{ display: 'block', marginTop: '4px', fontSize: '11px' }}>
-                            Если вы оформили тестовое задание в Яндекс Документах, прикрепите ссылку с открытым доступом на чтение.
+                          <small className="muted" style={{ display: 'block', marginTop: '6px', fontSize: '11.5px', lineHeight: 1.4 }}>
+                            {effectiveSlug === 'photo'
+                              ? 'Загрузите ровно 10 отобранных кадров в папку на Яндекс Диске и укажите ссылку с открытым доступом.'
+                              : effectiveSlug === 'smm'
+                              ? 'Создайте документ в Яндекс Документах / Диске и укажите ссылку с открытым доступом на чтение.'
+                              : effectiveSlug === 'design'
+                              ? 'Загрузите макет (PNG, JPG или PDF) на Яндекс Диск и укажите ссылку с открытым доступом.'
+                              : 'Загрузите готовый видеоролик на Яндекс Диск и укажите ссылку с открытым доступом.'}
                           </small>
                         </div>
                       )}
 
-                      {/* Design / Video / Montage / Content Cloud URL */}
-                      {effectiveSlug !== 'smm' && effectiveSlug !== 'photo' && (
+                      {/* Optional note (shown when method is NOT text) */}
+                      {submissionMethod !== 'text' && (
                         <div className="form-group" style={{ marginTop: '14px' }}>
-                          <label htmlFor="submissionUrl" style={{ fontSize: '12px', fontWeight: 600 }}>
-                            {effectiveSlug === 'design'
-                              ? 'Ссылка на макет в Figma или папку на Яндекс Диске'
-                              : 'Ссылка на видео на Яндекс Диске (если файл загружен в облако)'}
-                          </label>
-                          <div className="url-input-wrap">
-                            <LinkIcon size={16} className="url-icon" />
-                            <input
-                              id="submissionUrl"
-                              type="url"
-                              placeholder={
-                                effectiveSlug === 'design'
-                                  ? 'https://disk.yandex.ru/... или ссылка на Figma'
-                                  : 'https://disk.yandex.ru/...'
-                              }
-                              value={submissionUrl}
-                              onChange={(e) => setSubmissionUrl(e.target.value)}
-                            />
-                          </div>
-                          <small className="muted" style={{ display: 'block', marginTop: '4px', fontSize: '11px', lineHeight: 1.4 }}>
-                            {effectiveSlug === 'design'
-                              ? 'Вы можете прикрепить ссылку на проект в Figma или исходники на Яндекс Диске с открытым доступом.'
-                              : 'Большие видеоролики хронометражем до 1-2 минут рекомендуем загружать на Яндекс Диск с открытым доступом.'}
-                          </small>
-                        </div>
-                      )}
-
-                      {/* Non-SMM optional note */}
-                      {effectiveSlug !== 'smm' && (
-                        <div className="form-group" style={{ marginTop: '14px' }}>
-                          <label htmlFor="submissionText" style={{ fontSize: '12px', fontWeight: 600 }}>
+                          <label htmlFor="submissionNote" style={{ fontSize: '12px', fontWeight: 600 }}>
                             Пояснение к выполненному заданию (необязательно)
                           </label>
                           <textarea
-                            id="submissionText"
+                            id="submissionNote"
                             rows="3"
                             className="submission-textarea"
                             placeholder="Дополнительные примечания к работе, идея или используемые приёмы…"
@@ -987,7 +1009,7 @@ export default function PublicRecruitment() {
               <p>
                 <strong>1. Цель обработки данных</strong>
                 <br />
-                Предоставленные персональные данные (ФИО, учебная группа, контактный телефон, аккаунт в мессенджере Макс, ссылки на материалы и портфолио) обрабатываются исключительно в целях организации конкурсного отбора медиаволонтёров в студенческий медиацентр «МедиаКод».
+                Предоставленные персональные данные (ФИО, учебная группа, контактный телефон, номер телефона в мессенджере Макс, ссылки на материалы и портфолио) обрабатываются исключительно в целях организации конкурсного отбора медиаволонтёров в студенческий медиацентр «МедиаКод».
               </p>
               <p>
                 <strong>2. Конфиденциальность и безопасность</strong>
@@ -997,7 +1019,7 @@ export default function PublicRecruitment() {
               <p>
                 <strong>3. Связь с кандидатом</strong>
                 <br />
-                Номер телефона и контакт Макс используются куратором направления для информирования о результатах рассмотрения тестового задания и координации дальнейших встреч.
+                Номер телефона и контакт Макс используются сотрудниками медиацентра для оперативной связи, информирования о результатах рассмотрения тестового задания и координации дальнейших встреч.
               </p>
             </div>
             <div className="privacy-modal-footer">
