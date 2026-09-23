@@ -178,6 +178,26 @@ describe('Media Center API Tests', () => {
     assert.equal(staffRbRes.status, 403);
   });
 
+  test('PRIVACY: safeUser logic blocks sensitive fields for STUDENT', async () => {
+    const student = new SessionClient();
+    await student.request('/api/auth/login', { method: 'POST', body: JSON.stringify({ login: 'student', password: 'Demo123!' }) });
+    const listRes = await student.request('/api/users');
+    assert.equal(listRes.status, 200);
+    const users = listRes.data;
+    if (users.length > 0) {
+      const userDto = users[0];
+      assert.equal(userDto.email, undefined);
+      assert.equal(userDto.max_user_id, undefined);
+      assert.equal(userDto.password_hash, undefined);
+    }
+    const staff = new SessionClient();
+    await staff.request('/api/auth/login', { method: 'POST', body: JSON.stringify({ login: 'staff', password: 'Demo123!' }) });
+    const staffListRes = await staff.request('/api/users');
+    if (staffListRes.data.length > 0) {
+      assert.ok('must_change_password' in staffListRes.data[0]);
+    }
+  });
+
   test('STAFF flow: create task, select applicant, complete task, prevent duplicate points', async () => {
     const staff = new SessionClient();
     await staff.request('/api/auth/login', {

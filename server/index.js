@@ -90,6 +90,27 @@ export const role = (...roles) => (req, res, next) => {
 };
 
 // Helper: safe user object without password_hash and with total points & MAX fields
+// Helper: safe user object for STUDENT viewing other students (privacy)
+export function safeStudentView(u) {
+  if (!u) return null;
+  const fullSafe = safeUser(u);
+  return {
+    id: fullSafe.id,
+    first_name: fullSafe.first_name,
+    middle_name: fullSafe.middle_name,
+    last_name: fullSafe.last_name,
+    group_name: fullSafe.group_name,
+    year: fullSafe.year,
+    department: fullSafe.department,
+    bio: fullSafe.bio,
+    skills: fullSafe.skills,
+    phone: fullSafe.phone,
+    totalPoints: fullSafe.totalPoints,
+    completedTasksCount: fullSafe.completedTasksCount,
+    status: fullSafe.status
+  };
+}
+
 export function safeUser(u) {
   if (!u) return null;
   const { password_hash, ...safe } = u;
@@ -773,7 +794,7 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
     }
 
     const isPhoneMax = phone_is_max === 'true' || phone_is_max === true || phone_is_max === '1';
-    const finalMaxContact = isPhoneMax ? normalizedPhone : 'Номер не подтверждён как используемый в Макс';
+    const finalMaxContact = isPhoneMax ? normalizedPhone : null;
 
     const consentAccepted = consent === 'true' || consent === true || consent === '1';
     if (!consentAccepted) {
@@ -1623,7 +1644,7 @@ app.post('/api/tasks/:id/submit-completion', auth, role('STUDENT'), (req, res) =
   }
 
   audit(req.user.id, 'COMPLETION_SUBMITTED', 'APPLICATION', appRecord.id, { taskId });
-  res.json({ ok: true, message: 'Отчёт успешно отправлен на подтверждение куратору' });
+  res.json({ ok: true, message: 'Отчёт успешно отправлен на подтверждение сотруднику' });
 });
 
 // Staff / Admin updates application status (SELECTED, REJECTED, IN_PROGRESS, NO_SHOW, etc.)
@@ -1875,7 +1896,7 @@ app.get('/api/record-book/:id', auth, (req, res) => {
   `).all(targetId);
 
   res.json({
-    user: safeUser(user),
+    user: (req.user.role === 'STUDENT' && Number(targetId) !== req.user.id) ? safeStudentView(user) : safeUser(user),
     points
   });
 });
@@ -1975,7 +1996,7 @@ app.get('/api/users', auth, (req, res) => {
   sql += ' GROUP BY u.id ORDER BY points DESC, u.last_name ASC';
 
   const rows = db.prepare(sql).all(...args);
-  res.json(rows.map(safeUser));
+  res.json(rows.map(row => isStudent ? safeStudentView(row) : safeUser(row)));
 });
 
 // Single user profile with stats and completed tasks
@@ -2014,7 +2035,7 @@ app.get('/api/users/:id', auth, (req, res) => {
     Number(targetId) === req.user.id;
 
   res.json({
-    user: safeUser(user),
+    user: (req.user.role === 'STUDENT' && Number(targetId) !== req.user.id) ? safeStudentView(user) : safeUser(user),
     completedTasks,
     pointsHistory: canViewPoints ? pointsHistory : []
   });
