@@ -1,9 +1,19 @@
 /**
  * Конфигурация направлений отбора и тестовых заданий для «МедиаКод».
- * Единый источник истины для бекенда.
+ * Единый источник истины для клиентской части (Vite / React).
  *
  * Любой сотрудник или разработчик может открыть этот файл и изменить текст любого направления.
  */
+import { Camera, Video, Film, Palette, Share2, Mic } from 'lucide-react';
+
+export const TRACK_ICONS = {
+  PHOTO: Camera,
+  VIDEO: Video,
+  MONTAGE: Film,
+  DESIGN: Palette,
+  SMM: Share2,
+  CONTENT: Mic
+};
 
 export const RECRUITMENT_TRACKS = [
   {
@@ -12,19 +22,20 @@ export const RECRUITMENT_TRACKS = [
     name: 'Фотография',
     title: 'Тестовое задание — фотограф',
     description: 'Репортажная и портретная съёмка событий колледжа, работа со студийным светом и быстрая передача готовых снимков.',
-    instructions: `1. Сделайте серию из ровно 10 фотографий на тему «Один день в колледже».
-В серии обязательно должны присутствовать разноплановые кадры: общие планы (атмосфера аудиторий, холлов), средние планы (взаимодействие студентов, учебный процесс) и крупные / портретные планы (эмоции, лица).
+    instructions: `1. Сделайте репортаж из 10 фотографий на тему «Один день в колледже»..
+В серии обязательно должны присутствовать разноплановые кадры (общий планы , средний план и крупный план)
 
-2. Требования к файлам:
-• Формат: строго JPEG (.jpg / .jpeg). Другие форматы (PNG, RAW, ZIP, PDF) не принимаются.
-• Количество: ровно 10 снимков.
-• Качество: базовая цветокоррекция, кадрирование и резкость.
+2. Требования к файлам: 
+• Формат: строго JPEG (.jpg / .jpeg). Другие форматы (PNG, RAW, ZIP, PDF) не принимаются. 
+• Количество: ровно 10 снимков. 
+• Качество: резкость на главном объекте, не слишком темные/светлые
 
 3. Прикрепите все 10 фотографий в форму ниже. Никаких сторонних архивов скачивать не требуется.`,
     materials_url: null,
     submission_mode: 'PHOTO_10_JPEG',
     deadline: '2026-10-30',
-    is_open: 1
+    is_open: 1,
+    icon: Camera
   },
   {
     slug: 'video',
@@ -40,7 +51,8 @@ export const RECRUITMENT_TRACKS = [
     materials_url: null,
     submission_mode: 'VIDEO_OR_YANDEX_DISK',
     deadline: '2026-10-30',
-    is_open: 1
+    is_open: 1,
+    icon: Video
   },
   {
     slug: 'montage',
@@ -56,7 +68,8 @@ export const RECRUITMENT_TRACKS = [
     materials_url: 'https://disk.360.yandex.ru/d/SGu5txgr6xDnZw',
     submission_mode: 'MONTAGE_OR_YANDEX_DISK',
     deadline: '2026-10-30',
-    is_open: 1
+    is_open: 1,
+    icon: Film
   },
   {
     slug: 'design',
@@ -78,7 +91,8 @@ export const RECRUITMENT_TRACKS = [
     materials_url: null,
     submission_mode: 'DESIGN_OR_YANDEX_DISK',
     deadline: '2026-10-30',
-    is_open: 1
+    is_open: 1,
+    icon: Palette
   },
   {
     slug: 'smm',
@@ -108,7 +122,8 @@ export const RECRUITMENT_TRACKS = [
     materials_url: null,
     submission_mode: 'SMM_TEXT_PRIMARY',
     deadline: '2026-10-30',
-    is_open: 1
+    is_open: 1,
+    icon: Share2
   },
   {
     slug: 'content',
@@ -128,7 +143,8 @@ export const RECRUITMENT_TRACKS = [
     materials_url: null,
     submission_mode: 'CONTENT_OR_YANDEX_DISK',
     deadline: '2026-10-30',
-    is_open: 1
+    is_open: 1,
+    icon: Mic
   }
 ];
 
