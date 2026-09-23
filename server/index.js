@@ -1409,6 +1409,7 @@ app.get('/api/tasks/:id', auth, (req, res) => {
     // Student sees own application details
     const myApp = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(t.id, req.user.id);
     t.my_application = myApp || null;
+      if (myApp) t.my_versions = db.prepare('SELECT * FROM application_versions WHERE application_id = ? ORDER BY version_number DESC').all(myApp.id);
     t.application_status = myApp?.status || null;
 
     // Public list of selected volunteers (names only, no private comments)

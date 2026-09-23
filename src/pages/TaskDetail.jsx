@@ -30,7 +30,9 @@ export default function TaskDetail({ user }) {
   const [loading, setLoading] = useState(true);
   const [applyComment, setApplyComment] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
-  const [submissionNotes, setSubmissionNotes] = useState('');
+  const [submissionMethod, setSubmissionMethod] = useState('link');
+  const [materialsUrl, setMaterialsUrl] = useState('');
+  const [comment, setComment] = useState('');
   const [applying, setApplying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -110,14 +112,19 @@ export default function TaskDetail({ user }) {
   // Student submits completion proof
   const handleSubmitCompletion = async (e) => {
     e.preventDefault();
+    if (submissionMethod === 'link') {
+      if (!materialsUrl.trim()) return toast.error('Укажите ссылку на материалы');
+      if (!isValidYandexDiskLink(materialsUrl.trim())) return toast.error('Укажите корректную ссылку на Яндекс Диск');
+    }
     setSubmitting(true);
     try {
       await api(`/tasks/${id}/submit-completion`, {
         method: 'POST',
-        body: JSON.stringify({ submission_notes: submissionNotes })
+        body: JSON.stringify({ comment, materials_url: submissionMethod === 'link' ? materialsUrl.trim() : '', submission_method: submissionMethod })
       });
-      toast.success('Отчёт о выполнении передан сотруднику на проверку!');
-      setSubmissionNotes('');
+      toast.success('Отчёт о выполнении передан на проверку!');
+      setMaterialsUrl('');
+      setComment('');
       loadTask();
     } catch (err) {
       toast.error(err.message);
@@ -429,7 +436,24 @@ export default function TaskDetail({ user }) {
                       <p className="muted">Сотрудник проверяет выполненную работу. После подтверждения баллы поступят в зачётную книжку.</p>
                     </div>
                   </div>
-                  {myApp.submission_notes && (
+                  {(task.my_versions && task.my_versions.length > 0) ? (
+                    <div className="versions-history">
+                      <h4>История отчётов</h4>
+                      {task.my_versions.map(v => (
+                        <div key={v.id} className="version-item" style={{ marginBottom: '8px', padding: '8px', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                          <div className="muted" style={{ fontSize: '12px', marginBottom: '4px' }}>
+                            Версия {v.version_number} — {new Date(v.created_at).toLocaleString('ru-RU')}
+                          </div>
+                          {v.materials_url && (
+                            <div><b>Ссылка:</b> <a href={v.materials_url} target="_blank" rel="noreferrer">{v.materials_url}</a></div>
+                          )}
+                          {v.comment && (
+                            <div><b>Комментарий:</b> {v.comment}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : myApp.submission_notes && (
                     <div className="my-comment-box">
                       <span className="muted">Ваш отчёт:</span> «{myApp.submission_notes}»
                     </div>
@@ -533,7 +557,24 @@ export default function TaskDetail({ user }) {
                         </div>
                       )}
 
-                      {app.submission_notes && (
+                      {(app.versions && app.versions.length > 0) ? (
+                        <div className="versions-history" style={{ marginTop: '12px' }}>
+                          <b>История изменений:</b>
+                          {app.versions.map(v => (
+                            <div key={v.id} className="version-item" style={{ marginTop: '8px', padding: '8px', background: 'var(--bg-secondary)', borderRadius: '6px' }}>
+                              <div className="muted" style={{ fontSize: '12px', marginBottom: '4px' }}>
+                                Версия {v.version_number} — {new Date(v.created_at).toLocaleString('ru-RU')}
+                              </div>
+                              {v.materials_url && (
+                                <div><b>Ссылка:</b> <a href={v.materials_url} target="_blank" rel="noreferrer">{v.materials_url}</a></div>
+                              )}
+                              {v.comment && (
+                                <div><b>Комментарий:</b> {v.comment}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : app.submission_notes && (
                         <div className="applicant-submission">
                           <b>Отчёт медиаволонтёра:</b>
                           <p>{app.submission_notes}</p>
