@@ -29,6 +29,20 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
     newLogin: '',
     currentPassword: ''
   });
+  const formatRussianPhone = (val) => {
+    const digits = val.replace(/\D/g, '');
+    let d = digits;
+    if (d.startsWith('8')) d = '7' + d.slice(1);
+    if (!d.startsWith('7') && d.length > 0) d = '7' + d;
+    d = d.slice(0, 11);
+
+    if (d.length <= 1) return '+7 (';
+    if (d.length <= 4) return `+7 (${d.slice(1)}`;
+    if (d.length <= 7) return `+7 (${d.slice(1, 4)}) ${d.slice(4)}`;
+    if (d.length <= 9) return `+7 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`;
+    return `+7 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9, 11)}`;
+  };
+
   const [savingLogin, setSavingLogin] = useState(false);
 
   const handleSelectTheme = async (tId) => {
@@ -202,19 +216,19 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
                 <label>Телефон для связи</label>
                 <input
                   type="tel"
-                  placeholder="+7 (999) 000-00-00"
+                  placeholder="+7 (___) ___-__-__"
                   value={profileForm.phone}
-                  onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                  onChange={(e) => setProfileForm({ ...profileForm, phone: formatRussianPhone(e.target.value) })}
                 />
               </div>
 
               <div className="form-group">
-                <label>Контакт в Макс (аккаунт)</label>
+                <label>Номер телефона, зарегистрированный в Макс</label>
                 <input
-                  type="text"
-                  placeholder="никнейм или номер в Макс"
+                  type="tel"
+                  placeholder="+7 (___) ___-__-__"
                   value={profileForm.max_contact}
-                  onChange={(e) => setProfileForm({ ...profileForm, max_contact: e.target.value })}
+                  onChange={(e) => setProfileForm({ ...profileForm, max_contact: formatRussianPhone(e.target.value) })}
                 />
               </div>
             </div>
@@ -223,7 +237,7 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
               <label>Мои навыки и специализация (через запятую)</label>
               <input
                 type="text"
-                placeholder="Фотография, Видеосъёмка, Монтаж Premiere, СММ, Дизайн Figma…"
+                placeholder="Фотография, Видеосъёмка, Монтаж Premiere, СММ, Графический дизайн…"
                 value={profileForm.skills}
                 onChange={(e) => setProfileForm({ ...profileForm, skills: e.target.value })}
               />

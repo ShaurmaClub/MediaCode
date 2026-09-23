@@ -129,11 +129,14 @@ export default function RecruitmentReview({ currentUser }) {
       setBusyAction(true);
       const res = await api(`/recruitment/applications/${approvingApp.id}/approve-and-create-user`, {
         method: 'POST',
-        body: JSON.stringify({ password: customPassword || 'Demo123!' })
+        body: JSON.stringify(customPassword && customPassword.trim() ? { password: customPassword.trim() } : {})
       });
 
       toast.success('Кандидат успешно принят в команду медиацентра!');
-      setCreatedUserNotice(res);
+      setCreatedUserNotice({
+        ...res,
+        temporaryPassword: res.temporaryPassword || res.initialPassword
+      });
       setApprovingApp(null);
       if (selectedApp && selectedApp.id === approvingApp.id) {
         handleOpenDetail({ id: approvingApp.id });
@@ -671,15 +674,14 @@ export default function RecruitmentReview({ currentUser }) {
             </div>
 
             <div className="form-group">
-              <label>Пароль для первого входа</label>
+              <label>Пароль для первого входа (необязательно)</label>
               <input
                 type="text"
-                required
                 value={customPassword}
                 onChange={(e) => setCustomPassword(e.target.value)}
-                placeholder="Demo123!"
+                placeholder="Случайный надёжный пароль (если оставить пустым)"
               />
-              <small className="muted">При первом входе в систему медиаволонтёру будет предложено сменить этот временный пароль на свой постоянный.</small>
+              <small className="muted">Если оставить поле пустым, система сгенерирует надёжный случайный пароль. При первом входе в систему студенту потребуется сменить временный пароль на постоянный.</small>
             </div>
 
             <div className="modal-actions">

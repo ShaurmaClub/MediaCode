@@ -1154,15 +1154,17 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
     counter++;
   }
 
-  // Generate default password
-  const initialPassword = req.body.password || 'Demo123!';
+  // Generate secure temporary password if not provided
+  const initialPassword = (req.body && req.body.password && String(req.body.password).trim().length > 0)
+    ? String(req.body.password).trim()
+    : `MC_${crypto.randomBytes(4).toString('hex')}Aa1!`;
   const pwHash = bcrypt.hashSync(initialPassword, 10);
 
-  // Skill mapped from track
+  // Skill mapped from track (no Figma!)
   const trackSkillsMap = {
     PHOTO: 'Фотография, Свет, Lightroom',
     VIDEO: 'Видеосъёмка, Видеомонтаж, Premiere Pro',
-    DESIGN: 'Графический дизайн, Figma, Типографика',
+    DESIGN: 'Графический дизайн, Типографика, Вёрстка',
     SMM: 'СММ, Копирайтинг, Контент'
   };
   const skill = trackSkillsMap[appRecord.track_type] || appRecord.track_name;
@@ -1180,9 +1182,9 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
       firstName,
       lastName,
       middleName,
-      `${login}@college.local`,
+      null,
       appRecord.group_name,
-      `Медиаволонтёр медиацентра (направление «${appRecord.track_name}»). Принят по заявке ${appRecord.public_id}.`,
+      `Медиаволонтёр медиацентра (направление «${appRecord.track_name}»).`,
       skill,
       appRecord.phone,
       appRecord.max_contact
@@ -1228,7 +1230,8 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
     message: 'Кандидат успешно принят, создан аккаунт медиаволонтёра!',
     user: safeUser(createdUser),
     login,
-    initialPassword
+    initialPassword,
+    temporaryPassword: initialPassword
   });
 });
 
@@ -1848,11 +1851,19 @@ app.get('/api/record-book', auth, (req, res) => {
   });
 });
 
-// Get record book for specific student (Staff and Admin only)
-app.get('/api/record-book/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
+// Get record book for specific student
+app.get('/api/record-book/:id', auth, (req, res) => {
   const targetId = req.params.id;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+
+  // Students can only view record books of active students or their own.
+  // Viewing STAFF/ADMIN or inactive users by a student returns 403 Forbidden.
+  if (req.user.role === 'STUDENT') {
+    if (user.role !== 'STUDENT' || user.status !== 'ACTIVE') {
+      return res.status(403).json({ error: 'Зачётная книжка недоступна для просмотра' });
+    }
+  }
 
   const points = db.prepare(`
     SELECT p.*, t.title as task_title, u.first_name || ' ' || u.last_name as issuer_name
@@ -1997,10 +2008,15 @@ app.get('/api/users/:id', auth, (req, res) => {
     LIMIT 30
   `).all(targetId);
 
+  const canViewPoints =
+    req.user.role !== 'STUDENT' ||
+    (user.role === 'STUDENT' && user.status === 'ACTIVE') ||
+    Number(targetId) === req.user.id;
+
   res.json({
     user: safeUser(user),
     completedTasks,
-    pointsHistory: req.user.role !== 'STUDENT' || Number(targetId) === req.user.id ? pointsHistory : []
+    pointsHistory: canViewPoints ? pointsHistory : []
   });
 });
 
