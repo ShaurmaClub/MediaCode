@@ -42,7 +42,7 @@ export default function Login({ onLogin }) {
   const handleRequestReset = async (e) => {
     e.preventDefault();
     if (!resetContact.trim()) {
-      toast.error('Укажите ваш логин, телефон или контакт в Макс');
+      toast.error('Укажите ваш логин или телефон');
       return;
     }
 
@@ -178,10 +178,10 @@ export default function Login({ onLogin }) {
           ) : (
             <form onSubmit={handleRequestReset}>
               <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '16px' }}>
-                Укажите ваш логин, номер телефона или контакт в мессенджере Макс. Администратор или сотрудник медиацентра оперативно свяжется с вами для подтверждения личности и выдачи нового пароля.
+                Укажите ваш логин или номер телефона. Администратор или сотрудник медиацентра оперативно свяжется с вами для подтверждения личности и выдачи нового пароля.
               </p>
               <div className="form-group">
-                <label>Логин, телефон или контакт в Макс *</label>
+                <label>Логин или номер телефона *</label>
                 <input
                   type="text"
                   required

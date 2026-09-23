@@ -303,7 +303,7 @@ export default function RecruitmentReview({ currentUser }) {
                             <Phone size={12} /> {app.phone}
                           </span>
                           <span className="contact-line" style={{ fontSize: '11px' }}>
-                            <MessageSquare size={12} /> Макс: {
+                            <MessageSquare size={12} /> {
                               (app.max_contact && (app.max_contact === app.phone || app.max_contact.replace(/\D/g, '').endsWith((app.phone || '').replace(/\D/g, '').slice(-10))))
                                 ? 'используется этот номер'
                                 : 'не подтверждён'
@@ -469,7 +469,7 @@ export default function RecruitmentReview({ currentUser }) {
                   </a>
                 </div>
                 <div className="contact-box-item">
-                  <span className="muted">Мессенджер Макс:</span>
+                  <span className="muted">Макс на этом номере:</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span className="contact-value">
                       <MessageSquare size={14} /> {
@@ -668,7 +668,7 @@ export default function RecruitmentReview({ currentUser }) {
               <input
                 type="text"
                 disabled
-                value={`Телефон: ${approvingApp.phone} · Макс: ${approvingApp.max_contact}`}
+                value={`Телефон: `}
                 className="disabled-input"
               />
             </div>

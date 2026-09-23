@@ -205,7 +205,7 @@ export default function Dashboard({ user }) {
               ))}
             </div>
           ) : (
-            <Empty title="Пока нет открытых заданий" text="Загляните позже, кураторы скоро опубликуют новые задания." />
+            <Empty title="Пока нет открытых заданий" text="Загляните позже, сотрудники скоро опубликуют новые задания." />
           )}
         </div>
 
@@ -331,7 +331,7 @@ export default function Dashboard({ user }) {
           <div className="section-head">
             <div>
               <h2>Новые кандидаты на вступление</h2>
-              <p className="muted">Тестовые задания, требующие проверки кураторами направлений.</p>
+              <p className="muted">Тестовые задания, требующие проверки сотрудниками направлений.</p>
             </div>
             <Link to="/recruitment" className="text-link">
               Все заявки ({data.stats.pendingRecruitment}) →
@@ -346,7 +346,7 @@ export default function Dashboard({ user }) {
               );
               const maxDisplay = isMaxMatched
                 ? 'используется этот номер'
-                : 'номер не подтверждён как используемый в Макс';
+                : 'не подтверждён';
 
               return (
                 <div className="candidate-card-row" key={app.id}>
@@ -369,7 +369,7 @@ export default function Dashboard({ user }) {
                       </span>
                       <span className="candidate-contact-divider">•</span>
                       <span className="candidate-contact-item">
-                        <MessageSquare size={13} /> Макс: <em>{maxDisplay}</em>
+                        <MessageSquare size={13} /> <em>{maxDisplay}</em>
                       </span>
                       {app.created_at && (
                         <>

@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   department TEXT NOT NULL,
   group_name TEXT NOT NULL,
   phone TEXT NOT NULL,
-  max_contact TEXT NOT NULL,
+  max_contact TEXT,
   portfolio_url TEXT,
   submission_url TEXT,
   submission_text TEXT,
@@ -247,7 +247,7 @@ export function seed() {
 
     staffId = insUser.run(
       'staff', pw, 'STAFF', 'Алексей', 'Волков', 'staff@college.local',
-      null, null, 'Куратор медиацентра и студенческих проектов', 'Продюсирование, Видеопроизводство, Фотография',
+      null, null, 'Сотрудник медиацентра и студенческих проектов', 'Продюсирование, Видеопроизводство, Фотография',
       '+7 (900) 200-30-40', 'alex_volkov'
     ).lastInsertRowid;
 

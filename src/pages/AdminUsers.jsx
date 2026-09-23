@@ -228,7 +228,7 @@ export default function AdminUsers({ currentUser }) {
             >
               <option value="ALL">Все роли</option>
               <option value="STUDENT">Медиаволонтёры</option>
-              <option value="STAFF">Кураторы и сотрудники</option>
+              <option value="STAFF">Сотрудники</option>
               <option value="ADMIN">Администраторы</option>
             </select>
           </div>
@@ -394,7 +394,7 @@ export default function AdminUsers({ currentUser }) {
                   onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
                 >
                   <option value="STUDENT">Медиаволонтёр</option>
-                  <option value="STAFF">Куратор / Сотрудник</option>
+                  <option value="STAFF">Сотрудник</option>
                   <option value="ADMIN">Администратор</option>
                 </select>
               </div>
@@ -472,10 +472,10 @@ export default function AdminUsers({ currentUser }) {
               </div>
 
               <div className="form-group">
-                <label>Контакт в мессенджере Макс</label>
+                <label>Номер телефона в Макс</label>
                 <input
                   type="text"
-                  placeholder="@ник или телефон в Макс"
+                  placeholder="+7 (___) ___-__-__"
                   value={createForm.max_contact}
                   onChange={(e) => setCreateForm({ ...createForm, max_contact: e.target.value })}
                 />
@@ -524,7 +524,7 @@ export default function AdminUsers({ currentUser }) {
                   onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
                 >
                   <option value="STUDENT">Медиаволонтёр</option>
-                  <option value="STAFF">Куратор / Сотрудник</option>
+                  <option value="STAFF">Сотрудник</option>
                   <option value="ADMIN">Администратор</option>
                 </select>
               </div>
@@ -614,10 +614,10 @@ export default function AdminUsers({ currentUser }) {
               </div>
 
               <div className="form-group">
-                <label>Контакт в мессенджере Макс</label>
+                <label>Номер телефона в Макс</label>
                 <input
                   type="text"
-                  placeholder="@ник или телефон в Макс"
+                  placeholder="+7 (___) ___-__-__"
                   value={editUser.max_contact || ''}
                   onChange={(e) => setEditUser({ ...editUser, max_contact: e.target.value })}
                 />
