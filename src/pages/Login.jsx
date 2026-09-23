@@ -8,12 +8,14 @@ import Modal from '../components/Modal.jsx';
 export default function Login({ onLogin }) {
   const [form, setForm] = useState({ login: '', password: '' });
   const [activationMode, setActivationMode] = useState(false);
+  const [loginMode, setLoginMode] = useState('phone'); // 'phone' or 'login'
   const [showPassword, setShowPassword] = useState(false);
   const [showActPassword, setShowActPassword] = useState(false);
   const [activationPhone, setActivationPhone] = useState('');
   const [actForm, setActForm] = useState({
     token: '', first_name: '', last_name: '', department: '', group_name: '', login: '', password: ''
   });
+  const [actConsent, setActConsent] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -76,7 +78,7 @@ export default function Login({ onLogin }) {
       const res = await fetch('/api/auth/activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: activationPhone, ...actForm })
+        body: JSON.stringify({ phone: activationPhone, ...actForm, consent_version: '2026-09' })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Ошибка активации');
@@ -153,6 +155,20 @@ export default function Login({ onLogin }) {
               </div>
             </div>
 
+            <div style={{ background: 'var(--surface)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '16px', marginTop: '16px' }}>
+              <label className="checkbox-label" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', margin: 0 }}>
+                <input
+                  type="checkbox"
+                  required
+                  checked={actConsent}
+                  onChange={e => setActConsent(e.target.checked)}
+                  style={{ marginTop: '2px' }}
+                />
+                <span style={{ fontSize: '12px', lineHeight: 1.4 }}>
+                  Я даю <a href="/privacy.pdf" target="_blank" className="text-link" onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы кабинета.
+                </span>
+              </label>
+            </div>
             <button type="submit" className="btn primary" style={{ width: '100%', marginTop: '8px' }} disabled={busy}>
               {busy ? 'Активация...' : 'Активировать аккаунт'}
             </button>
@@ -205,18 +221,38 @@ export default function Login({ onLogin }) {
 
           {error && <div className="error-banner">{error}</div>}
 
-          <div className="form-group">
-            <label htmlFor="login-input">Логин или номер телефона</label>
-            <input
-              id="login-input"
-              type="text"
-              required
-              autoFocus
-              value={form.login}
-              onChange={(e) => setForm({ ...form, login: e.target.value })}
-              placeholder="Например: ivan_petrov или +7 (900) 000-00-00"
-            />
-          </div>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: 'var(--surface2)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
+              <button type="button" onClick={() => { setLoginMode('phone'); setForm({...form, login: ''}); }} className={`btn ${loginMode === 'phone' ? 'secondary' : 'ghost'}`} style={{ flex: 1, borderRadius: 'var(--radius-sm)' }}>
+                По номеру телефона
+              </button>
+              <button type="button" onClick={() => { setLoginMode('login'); setForm({...form, login: ''}); }} className={`btn ${loginMode === 'login' ? 'secondary' : 'ghost'}`} style={{ flex: 1, borderRadius: 'var(--radius-sm)' }}>
+                По логину
+              </button>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="login-input">{loginMode === 'phone' ? 'Номер телефона' : 'Логин'}</label>
+              <input
+                id="login-input"
+                type={loginMode === 'phone' ? "tel" : "text"}
+                required
+                autoFocus
+                value={form.login}
+                onChange={(e) => {
+                  let val = e.target.value;
+                  if (loginMode === 'phone') {
+                    // We can just let them type, backend handles normalization
+                  } else {
+                    // Block pure numbers or phone-like inputs in login mode visually? User requested it.
+                  }
+                  setForm({ ...form, login: val });
+                }}
+                placeholder={loginMode === 'phone' ? "+7 (900) 000-00-00" : "Например: ivan_petrov"}
+              />
+              {loginMode === 'login' && /^\+?[0-9\s\-\(\)]{10,}$/.test(form.login) && (
+                <small className="text-warning" style={{ marginTop: '4px', display: 'block' }}>Похоже на номер телефона. Используйте вкладку «По номеру телефона».</small>
+              )}
+            </div>
 
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

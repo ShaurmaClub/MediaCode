@@ -41,9 +41,14 @@ app.use(helmet({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
+if (isProduction && !process.env.SESSION_SECRET) {
+  console.error("FATAL ERROR: SESSION_SECRET is not set in production!");
+  process.exit(1);
+}
+
 app.use(session({
   store: new SQLiteSessionStore(),
-  secret: process.env.SESSION_SECRET || 'dev-only-secret-do-not-use-in-production-2026',
+  secret: process.env.SESSION_SECRET || 'dev-only-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -55,6 +60,16 @@ app.use(session({
 }));
 
 // Rate limiter for auth endpoints
+
+// Rate limiter for uploads and reports
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Превышен лимит загрузок. Пожалуйста, подождите час.' }
+});
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -77,6 +92,27 @@ export const auth = (req, res, next) => {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация в системе' });
   }
+  req.user = req.session.user;
+  next();
+};
+
+export const strictAuth = (req, res, next) => {
+  if (!req.session || !req.session.user) {
+    return res.status(401).json({ error: 'Требуется авторизация в системе' });
+  }
+  const user = db.prepare('SELECT status, must_change_password, privacy_consent_at FROM users WHERE id = ?').get(req.session.user.id);
+  if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
+  
+  if (user.status !== 'ACTIVE') {
+    return res.status(403).json({ error: 'Аккаунт не активен' });
+  }
+  if (user.must_change_password) {
+    return res.status(403).json({ error: 'Требуется смена пароля', code: 'MUST_CHANGE_PASSWORD' });
+  }
+  if (!user.privacy_consent_at) {
+    return res.status(403).json({ error: 'Требуется согласие на обработку персональных данных', code: 'REQUIRES_CONSENT' });
+  }
+  
   req.user = req.session.user;
   next();
 };
@@ -270,24 +306,23 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   const rawLogin = String(login).trim();
   const cleanLogin = rawLogin.toLowerCase();
   
-  // Try normal login search
-  let user = db.prepare("SELECT * FROM users WHERE login = ? AND status = 'ACTIVE'").get(cleanLogin);
+  let user = null;
+  const normalizedPhone = normalizeRussianPhone(rawLogin);
   
-  // Try phone search
-  if (!user) {
-    const normalizedPhone = normalizeRussianPhone(rawLogin);
-    if (normalizedPhone) {
-      // Check if pending activation
-      const pendingUser = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(normalizedPhone);
-      if (pendingUser) {
-        return res.json({ requiresActivation: true, phone: normalizedPhone });
-      }
-      user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'ACTIVE'").get(normalizedPhone);
+  if (normalizedPhone) {
+    // Check if pending activation
+    const pendingUser = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(normalizedPhone);
+    if (pendingUser) {
+      return res.json({ requiresActivation: true, phone: normalizedPhone });
     }
+    user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'ACTIVE'").get(normalizedPhone);
+  } else {
+    user = db.prepare("SELECT * FROM users WHERE login = ? AND status = 'ACTIVE'").get(cleanLogin);
   }
+  
   if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
     audit(user?.id || null, 'LOGIN_FAILED', 'AUTH', null, { login });
-    return res.status(401).json({ error: 'Неверный логин или пароль, либо аккаунт деактивирован' });
+    return res.status(401).json({ error: 'Неверный логин, номер телефона или пароль.' });
   }
 
   req.session.user = {
@@ -407,6 +442,19 @@ app.post('/api/auth/first-login-password-change', auth, authLimiter, (req, res) 
 });
 
 // User changes login in account settings (requires current password)
+app.post('/api/auth/privacy-consent', auth, (req, res) => {
+  const { consent_version } = req.body;
+  if (!consent_version) {
+    return res.status(400).json({ error: 'Требуется версия политики' });
+  }
+  
+  db.prepare("UPDATE users SET privacy_consent_at = CURRENT_TIMESTAMP, privacy_policy_version = ? WHERE id = ?").run(consent_version, req.user.id);
+  audit(req.user.id, 'PRIVACY_CONSENT', 'AUTH', req.user.id, { version: consent_version });
+  
+  const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({ ok: true, user: safeUser(updated) });
+});
+
 app.post('/api/auth/change-login', auth, authLimiter, (req, res) => {
   const { currentPassword, newLogin } = req.body || {};
   if (!currentPassword || !newLogin) {
@@ -414,8 +462,10 @@ app.post('/api/auth/change-login', auth, authLimiter, (req, res) => {
   }
 
   const cleanLogin = String(newLogin).trim().toLowerCase();
-  if (!/^[a-z0-9_.-]{3,30}$/.test(cleanLogin)) {
-    return res.status(400).json({ error: 'Логин должен быть от 3 до 30 символов (латинские буквы, цифры, дефис, точка)' });
+  if (/^\d+$/.test(cleanLogin)) return res.status(400).json({error: 'Логин не может состоять только из цифр'});
+  if (normalizeRussianPhone(cleanLogin)) return res.status(400).json({error: 'Логин не должен быть похож на номер телефона'});
+  if (!/^[a-zA-Zа-яА-ЯёЁ0-9_\-\.]{3,32}$/.test(cleanLogin)) {
+    return res.status(400).json({ error: 'Логин должен быть от 3 до 32 символов (буквы, цифры, дефис, точка, подчёркивание)' });
   }
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -560,7 +610,7 @@ app.post('/api/user/link-max', auth, (req, res) => {
 // DASHBOARD ROUTE
 // ==========================================
 
-app.get('/api/dashboard', auth, (req, res) => {
+app.get('/api/dashboard', strictAuth, (req, res) => {
   const u = req.user;
 
   if (u.role === 'STUDENT') {
@@ -717,7 +767,11 @@ app.get('/api/public/recruitment/track/:slugOrType', (req, res) => {
 // Russian phone normalization helper: stores as +7XXXXXXXXXX
 function normalizeRussianPhone(rawPhone) {
   if (!rawPhone) return null;
-  const digits = String(rawPhone).replace(/\D/g, '');
+  const raw = String(rawPhone).trim();
+  // If it contains any letters, it's not a phone number
+  if (/[a-zA-Zа-яА-ЯёЁ]/.test(raw)) return null;
+  
+  const digits = raw.replace(/\D/g, '');
   let d = digits;
   if (d.length === 11 && (d.startsWith('7') || d.startsWith('8'))) {
     d = '7' + d.slice(1);
@@ -1060,7 +1114,7 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
 // ==========================================
 
 // List recruitment applications (Staff/Admin)
-app.get('/api/recruitment/applications', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.get('/api/recruitment/applications', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const { track, status, search } = req.query;
 
   let sql = `
@@ -1112,7 +1166,7 @@ app.get('/api/recruitment/applications', auth, role('STAFF', 'ADMIN'), (req, res
 });
 
 // Single application details with files
-app.get('/api/recruitment/applications/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.get('/api/recruitment/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const appRecord = db.prepare(`
     SELECT
       ra.*,
@@ -1147,7 +1201,7 @@ app.get('/api/recruitment/applications/:id', auth, role('STAFF', 'ADMIN'), (req,
 });
 
 // Download attached file
-app.get('/api/recruitment/files/:id/download', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.get('/api/recruitment/files/:id/download', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const fileRecord = db.prepare('SELECT * FROM recruitment_files WHERE id = ?').get(req.params.id);
   if (!fileRecord) {
     return res.status(404).json({ error: 'Файл не найден' });
@@ -1165,7 +1219,7 @@ app.get('/api/recruitment/files/:id/download', auth, role('STAFF', 'ADMIN'), (re
 });
 
 // Update recruitment application status (IN_REVIEW, REJECTED, APPROVED)
-app.patch('/api/recruitment/applications/:id/status', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.patch('/api/recruitment/applications/:id/status', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const appId = req.params.id;
   const appRecord = db.prepare('SELECT * FROM recruitment_applications WHERE id = ?').get(appId);
   if (!appRecord) return res.status(404).json({ error: 'Заявка не найдена' });
@@ -1191,7 +1245,7 @@ app.patch('/api/recruitment/applications/:id/status', auth, role('STAFF', 'ADMIN
 });
 
 // Approve application & create Media Center Student account
-app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.post('/api/recruitment/applications/:id/approve-and-create-user', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const appId = req.params.id;
   const appRecord = db.prepare(`
     SELECT ra.*, rt.name as track_name, rt.type as track_type
@@ -1251,15 +1305,12 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
 
   let newUserId;
   const tx = db.transaction(() => {
-    const fName = normalizeName(d.first_name);
-    const lName = normalizeName(d.last_name);
-    const mName = normalizeName(d.middle_name);
-
     const r = db.prepare(`
       INSERT INTO users (
         login, password_hash, role, first_name, last_name, middle_name,
-        email, group_name, year, bio, skills, phone, max_contact, status, must_change_password
-      ) VALUES (?, ?, 'STUDENT', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'ACTIVE', 1)
+        email, group_name, year, bio, skills, phone, max_contact, status, must_change_password,
+        privacy_consent_at, privacy_policy_version
+      ) VALUES (?, ?, 'STUDENT', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'ACTIVE', 1, CURRENT_TIMESTAMP, '2026-09')
     `).run(
       login,
       pwHash,
@@ -1321,7 +1372,7 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
 
 // Recruitment tracks management (Staff/Admin)
 // Admin route to allow resubmission
-app.post('/api/recruitment/applications/:id/allow-resubmission', auth, role('ADMIN'), (req, res) => {
+app.post('/api/recruitment/applications/:id/allow-resubmission', strictAuth, role('ADMIN'), (req, res) => {
   const id = req.params.id;
   const existing = db.prepare('SELECT * FROM recruitment_applications WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Заявка не найдена' });
@@ -1331,7 +1382,7 @@ app.post('/api/recruitment/applications/:id/allow-resubmission', auth, role('ADM
   res.json({ ok: true, message: 'Повторная подача заявки разрешена' });
 });
 
-app.get('/api/recruitment/tracks', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.get('/api/recruitment/tracks', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const tracks = db.prepare(`
     SELECT rt.*,
       (SELECT COUNT(*) FROM recruitment_applications ra WHERE ra.track_id = rt.id) as total_applications,
@@ -1342,7 +1393,7 @@ app.get('/api/recruitment/tracks', auth, role('STAFF', 'ADMIN'), (req, res) => {
   res.json(tracks);
 });
 
-app.patch('/api/recruitment/tracks/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.patch('/api/recruitment/tracks/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const trackId = req.params.id;
   const existing = db.prepare('SELECT * FROM recruitment_tracks WHERE id = ?').get(trackId);
   if (!existing) return res.status(404).json({ error: 'Направление не найдено' });
@@ -1378,7 +1429,7 @@ app.patch('/api/recruitment/tracks/:id', auth, role('STAFF', 'ADMIN'), (req, res
 // ==========================================
 
 // List tasks
-app.get('/api/tasks', auth, (req, res) => {
+app.get('/api/tasks', strictAuth, (req, res) => {
   const { status, category, search } = req.query;
   const isStudent = req.user.role === 'STUDENT';
 
@@ -1431,7 +1482,7 @@ app.get('/api/tasks', auth, (req, res) => {
 });
 
 // Get single task details
-app.get('/api/tasks/:id', auth, (req, res) => {
+app.get('/api/tasks/:id', strictAuth, (req, res) => {
   const t = db.prepare(`
     SELECT t.*, u.first_name || ' ' || u.last_name as creator, u.email as creator_email
     FROM tasks t
@@ -1484,7 +1535,7 @@ app.get('/api/tasks/:id', auth, (req, res) => {
 });
 
 // Create task (Staff / Admin)
-app.post('/api/tasks', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.post('/api/tasks', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const d = req.body || {};
   if (!d.title || !d.title.trim()) {
     return res.status(400).json({ error: 'Название мероприятия обязательно' });
@@ -1546,7 +1597,7 @@ app.post('/api/tasks', auth, role('STAFF', 'ADMIN'), (req, res) => {
 });
 
 // Update task (Staff / Admin)
-app.patch('/api/tasks/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.patch('/api/tasks/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const taskId = req.params.id;
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   if (!existing) return res.status(404).json({ error: 'Мероприятие не найдено' });
@@ -1605,7 +1656,7 @@ app.patch('/api/tasks/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
 });
 
 // Delete or cancel task (Admin or creator Staff)
-app.delete('/api/tasks/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.delete('/api/tasks/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const taskId = req.params.id;
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   if (!existing) return res.status(404).json({ error: 'Мероприятие не найдено' });
@@ -1628,7 +1679,7 @@ app.delete('/api/tasks/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
 // ==========================================
 
 // Student applies for a task
-app.post('/api/tasks/:id/apply', auth, role('STUDENT'), (req, res) => {
+app.post('/api/tasks/:id/apply', strictAuth, role('STUDENT'), (req, res) => {
   const taskId = req.params.id;
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   if (!task) return res.status(404).json({ error: 'Мероприятие не найдено' });
@@ -1671,7 +1722,7 @@ app.post('/api/tasks/:id/apply', auth, role('STUDENT'), (req, res) => {
 });
 
 // Student withdraws their application
-app.post('/api/tasks/:id/withdraw', auth, role('STUDENT'), (req, res) => {
+app.post('/api/tasks/:id/withdraw', strictAuth, role('STUDENT'), (req, res) => {
   const taskId = req.params.id;
   const appRecord = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(taskId, req.user.id);
   if (!appRecord) return res.status(404).json({ error: 'Заявка не найдена' });
@@ -1692,7 +1743,7 @@ app.post('/api/tasks/:id/withdraw', auth, role('STUDENT'), (req, res) => {
 });
 
 // Student marks progress or submits completion proof
-app.post('/api/tasks/:id/submit-completion', auth, role('STUDENT'), (req, res) => {
+app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), uploadLimiter, (req, res) => {
   const taskId = req.params.id;
   const appRecord = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(taskId, req.user.id);
   if (!appRecord) return res.status(404).json({ error: 'Вы не являетесь участником этого мероприятия' });
@@ -1723,7 +1774,7 @@ app.post('/api/tasks/:id/submit-completion', auth, role('STUDENT'), (req, res) =
 });
 
 // Staff / Admin updates application status (SELECTED, REJECTED, IN_PROGRESS, NO_SHOW, etc.)
-app.patch('/api/applications/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.patch('/api/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const appId = req.params.id;
   const appRecord = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
   if (!appRecord) return res.status(404).json({ error: 'Заявка не найдена' });
@@ -1766,7 +1817,7 @@ app.patch('/api/applications/:id', auth, role('STAFF', 'ADMIN'), (req, res) => {
 });
 
 // Staff / Admin confirms completion and awards points for a task
-app.post('/api/tasks/:id/complete', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const taskId = req.params.id;
   const targetUserId = req.body.user_id;
   if (!targetUserId) return res.status(400).json({ error: 'Укажите ID студента' });
@@ -1826,7 +1877,7 @@ app.post('/api/tasks/:id/complete', auth, role('STAFF', 'ADMIN'), (req, res) => 
 // ==========================================
 
 // Staff / Admin awards manual points or bonus to student
-app.post('/api/points/award', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.post('/api/points/award', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const { user_id, amount, reason, category, task_id } = req.body || {};
   if (!user_id) return res.status(400).json({ error: 'Укажите студента' });
   if (!reason || !reason.trim()) return res.status(400).json({ error: 'Укажите причину начисления' });
@@ -1866,7 +1917,7 @@ app.post('/api/points/award', auth, role('STAFF', 'ADMIN'), (req, res) => {
 });
 
 // Staff / Admin reverses points transaction
-app.post('/api/points/:id/reverse', auth, role('ADMIN'), (req, res) => {
+app.post('/api/points/:id/reverse', strictAuth, role('ADMIN'), (req, res) => {
   const pointId = req.params.id;
   const original = db.prepare('SELECT * FROM points WHERE id = ?').get(pointId);
   if (!original) return res.status(404).json({ error: 'Запись начисления не найдена' });
@@ -1927,7 +1978,7 @@ app.post('/api/points/:id/reverse', auth, role('ADMIN'), (req, res) => {
 });
 
 // Get record book for current user
-app.get('/api/record-book', auth, (req, res) => {
+app.get('/api/record-book', strictAuth, (req, res) => {
   const userId = req.user.id;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
@@ -1948,7 +1999,7 @@ app.get('/api/record-book', auth, (req, res) => {
 });
 
 // Get record book for specific student
-app.get('/api/record-book/:id', auth, (req, res) => {
+app.get('/api/record-book/:id', strictAuth, (req, res) => {
   const targetId = req.params.id;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
@@ -1980,7 +2031,7 @@ app.get('/api/record-book/:id', auth, (req, res) => {
 // LEADERBOARD
 // ==========================================
 
-app.get('/api/leaderboard', auth, (req, res) => {
+app.get('/api/leaderboard', strictAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT
       u.id, u.first_name, u.last_name, u.group_name, u.year, u.skills, u.bio,
@@ -2000,7 +2051,7 @@ app.get('/api/leaderboard', auth, (req, res) => {
 // NOTIFICATIONS
 // ==========================================
 
-app.get('/api/notifications', auth, (req, res) => {
+app.get('/api/notifications', strictAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT * FROM notifications
     WHERE user_id = ?
@@ -2012,7 +2063,7 @@ app.get('/api/notifications', auth, (req, res) => {
   res.json({ notifications: rows, unreadCount });
 });
 
-app.patch('/api/notifications/:id/read', auth, (req, res) => {
+app.patch('/api/notifications/:id/read', strictAuth, (req, res) => {
   db.prepare(`
     UPDATE notifications
     SET read_at = CURRENT_TIMESTAMP
@@ -2021,7 +2072,7 @@ app.patch('/api/notifications/:id/read', auth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/notifications/read-all', auth, (req, res) => {
+app.post('/api/notifications/read-all', strictAuth, (req, res) => {
   db.prepare(`
     UPDATE notifications
     SET read_at = CURRENT_TIMESTAMP
@@ -2035,7 +2086,7 @@ app.post('/api/notifications/read-all', auth, (req, res) => {
 // ==========================================
 
 // List users (Staff & Admin see all, students can view volunteer directory)
-app.get('/api/users', auth, (req, res) => {
+app.get('/api/users', strictAuth, (req, res) => {
   const { role: filterRole, status: filterStatus, search } = req.query;
   const isStudent = req.user.role === 'STUDENT';
 
@@ -2075,7 +2126,7 @@ app.get('/api/users', auth, (req, res) => {
 });
 
 // Single user profile with stats and completed tasks
-app.get('/api/users/:id', auth, (req, res) => {
+app.get('/api/users/:id', strictAuth, (req, res) => {
   const targetId = req.params.id;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
@@ -2117,7 +2168,7 @@ app.get('/api/users/:id', auth, (req, res) => {
 });
 
 // Create user (Admin only)
-app.post('/api/users', auth, role('ADMIN'), (req, res) => {
+app.post('/api/users', strictAuth, role('ADMIN'), (req, res) => {
   const d = req.body || {};
   if (!d.login || !d.login.trim()) {
     return res.status(400).json({ error: 'Логин обязателен' });
@@ -2134,6 +2185,12 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
   }
 
   const cleanLogin = String(d.login).trim().toLowerCase();
+  if (cleanLogin.length < 3 || cleanLogin.length > 32 || !/^[a-z0-9_\-\.]+$/.test(cleanLogin)) {
+    return res.status(400).json({ error: 'Логин должен быть от 3 до 32 символов и содержать только буквы, цифры, _, -, .' });
+  }
+  if (/^\d+$/.test(cleanLogin)) {
+    return res.status(400).json({ error: 'Логин не может состоять только из цифр' });
+  }
   
   if (d.phone && d.phone.trim()) {
     const normalizedPhone = normalizeRussianPhone(d.phone.trim());
@@ -2148,6 +2205,9 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
 
   try {
     const pwHash = bcrypt.hashSync(finalPassword, 10);
+    const fName = normalizeName(d.first_name);
+    const lName = normalizeName(d.last_name);
+    const mName = normalizeName(d.middle_name);
     const r = db.prepare(`
       INSERT INTO users (
         login, password_hash, role, first_name, last_name, middle_name,
@@ -2192,9 +2252,10 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
 });
 
 // Mass Create (Admin only)
-app.post('/api/users/mass-create', auth, role('ADMIN'), (req, res) => {
-  const { phones } = req.body;
-  if (!Array.isArray(phones)) return res.status(400).json({ error: 'phones must be an array' });
+app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
+  let phones = req.body.phones;
+  if (typeof phones === 'string') phones = phones.split('\n').map(p => p.trim()).filter(Boolean);
+  if (!Array.isArray(phones)) return res.status(400).json({ error: 'phones must be an array or string' });
 
   const added = [];
   const errors = [];
@@ -2230,14 +2291,46 @@ app.post('/api/auth/activation-check', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/auth/activate', (req, res) => {
-  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password } = req.body;
+app.post('/api/auth/activate', authLimiter, (req, res) => {
+  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password, consent_version } = req.body;
   const np = normalizeRussianPhone(phone);
   const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
-  if (!user || user.activation_token !== String(token).trim()) return res.status(400).json({error: 'Неверный код активации или пользователь не найден'});
+  
+  if (!user) {
+    return res.status(400).json({error: 'Неверный код активации или пользователь не найден'});
+  }
+  
+  if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
+    return res.status(429).json({error: 'Слишком много неверных попыток. Ввод временно заблокирован. Пожалуйста, подождите 15 минут.'});
+  }
+  
+  if (user.activation_token !== String(token).trim()) {
+    const attempts = (user.activation_attempts || 0) + 1;
+    if (attempts >= 5) {
+      const lockUntil = new Date(Date.now() + 15 * 60000).toISOString();
+      db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(lockUntil, user.id);
+      return res.status(429).json({error: 'Слишком много неверных попыток. Ввод временно заблокирован. Пожалуйста, подождите 15 минут.'});
+    } else {
+      db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
+      return res.status(400).json({error: 'Неверный код активации'});
+    }
+  }
 
-  if (!first_name || !last_name || !department || !group_name || !login || !password) {
-    return res.status(400).json({error: 'Заполните все обязательные поля'});
+  if (!first_name || !last_name || !department || !group_name || !login || !password || !consent_version) {
+    return res.status(400).json({error: 'Заполните все обязательные поля и дайте согласие'});
+  }
+  if (password.length < 8) {
+    return res.status(400).json({error: 'Пароль должен содержать минимум 8 символов'});
+  }
+  
+  if (/^\d+$/.test(login.trim())) {
+    return res.status(400).json({error: 'Логин не может состоять только из цифр'});
+  }
+  if (normalizeRussianPhone(login.trim())) {
+    return res.status(400).json({error: 'Логин не должен быть похож на номер телефона'});
+  }
+  if (!/^[a-zA-Zа-яА-ЯёЁ0-9_\-\.]+$/.test(login.trim()) || login.trim().length < 3) {
+    return res.status(400).json({error: 'Логин должен быть от 3 символов и содержать только буквы, цифры, точки, тире или подчёркивания'});
   }
 
   const cyrillicFioRegex = /^[А-Яа-яЁё\s-]+$/;
@@ -2249,19 +2342,20 @@ app.post('/api/auth/activate', (req, res) => {
   const existingLogin = db.prepare("SELECT id FROM users WHERE login = ?").get(cleanLogin);
   if (existingLogin) return res.status(409).json({error: 'Этот логин уже занят'});
 
-  const hash = require('bcryptjs').hashSync(password, 10);
+  const hash = bcrypt.hashSync(password, 10);
   
   db.prepare(`
     UPDATE users 
-    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL 
+    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL, privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?
     WHERE id=?
-  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, user.id);
+  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, consent_version, user.id);
   
+  audit(user.id, 'USER_ACTIVATED', 'AUTH', user.id);
   res.json({ok: true, message: 'Аккаунт активирован. Вы можете войти.'});
 });
 
 // Update user (Admin only)
-app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
+app.patch('/api/users/:id', strictAuth, role('ADMIN'), (req, res) => {
   const targetId = req.params.id;
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!existing) return res.status(404).json({ error: 'Пользователь не найден' });
@@ -2321,7 +2415,7 @@ app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
 });
 
 // Reset user password (Admin only)
-app.post('/api/users/:id/reset-password', auth, role('ADMIN'), (req, res) => {
+app.post('/api/users/:id/reset-password', strictAuth, role('ADMIN'), authLimiter, (req, res) => {
   const targetId = req.params.id;
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!existing) return res.status(404).json({ error: 'Пользователь не найден' });
@@ -2352,7 +2446,7 @@ app.post('/api/users/:id/reset-password', auth, role('ADMIN'), (req, res) => {
 // AUDIT LOGS
 // ==========================================
 
-app.get('/api/audit', auth, role('ADMIN'), (req, res) => {
+app.get('/api/audit', strictAuth, role('ADMIN'), (req, res) => {
   const { action, entity_type, limit = 200 } = req.query;
 
   let sql = `

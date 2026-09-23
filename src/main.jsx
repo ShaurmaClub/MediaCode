@@ -6,6 +6,7 @@ import { ToastProvider } from './context/ToastContext.jsx';
 import Shell from './components/Shell.jsx';
 import Login from './pages/Login.jsx';
 import FirstLogin from './pages/FirstLogin.jsx';
+import PrivacyConsent from './pages/PrivacyConsent.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Tasks from './pages/Tasks.jsx';
 import TaskDetail from './pages/TaskDetail.jsx';
@@ -101,6 +102,15 @@ function App() {
       <FirstLogin
         user={user}
         onPasswordChanged={(updatedUser) => setUser(updatedUser)}
+      />
+    );
+  }
+
+  if (!user.privacy_consent_at) {
+    return (
+      <PrivacyConsent
+        user={user}
+        onConsented={(updatedUser) => setUser(updatedUser)}
       />
     );
   }

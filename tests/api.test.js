@@ -220,7 +220,7 @@ describe('Media Center API Tests', () => {
         status: 'OPEN'
       })
     });
-    assert.equal(taskRes.status, 201);
+    if(taskRes.status !== 201) console.log('ERROR:', taskRes); assert.equal(taskRes.status, 201);
     const newTaskId = taskRes.data.id;
 
     // Student applies to the new task
@@ -233,7 +233,7 @@ describe('Media Center API Tests', () => {
       method: 'POST',
       body: JSON.stringify({ comment: 'С удовольствием помогу' })
     });
-    assert.equal(applyRes.status, 201);
+    if(applyRes.status !== 201) console.log('ERROR:', applyRes); assert.equal(applyRes.status, 201);
 
     // Staff views task details
     const detailRes = await staff.request(`/api/tasks/${newTaskId}`);
@@ -289,7 +289,7 @@ describe('Media Center API Tests', () => {
         year: 1
       })
     });
-    assert.equal(createRes.status, 201);
+    if(createRes.status !== 201) console.log('ERROR:', createRes); assert.equal(createRes.status, 201);
     const testUserId = createRes.data.id;
 
     // Update user
@@ -392,7 +392,7 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'ИС-21',
         phone: '+7 999 111-22-33',
-        max_contact: '@petrov',
+        max_contact: '+7 900 123-45-67',
         submission_url: 'https://disk.yandex.ru/d/test12345',
         consent: false
       })
@@ -408,9 +408,9 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'ИС-21',
         phone: '+7 999 111-22-33',
-        max_contact: '@johndoe',
+        max_contact: '+7 900 123-45-67',
         submission_url: 'https://disk.yandex.ru/d/test12345',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
     assert.equal(nonCyrillicFioRes.status, 400);
@@ -426,9 +426,9 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'ИС-21',
         phone: '+7 999 111-22-33',
-        max_contact: '@ivan',
+        max_contact: '+7 900 123-45-67',
         submission_url: 'https://disk.yandex.ru/d/test12345',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
     assert.equal(numFioRes.status, 400);
@@ -442,8 +442,8 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'ИС-21',
         phone: '+7 999 111-22-33',
-        max_contact: '@petrov',
-        consent: true
+        max_contact: '+7 900 123-45-67',
+        phone_is_max: true, consent: true
       })
     });
     assert.equal(noMaterialRes.status, 400);
@@ -457,9 +457,9 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'ИС-21',
         phone: '123-bad-phone',
-        max_contact: '@petrov',
+        max_contact: '+7 900 123-45-67',
         submission_url: 'https://disk.yandex.ru/d/test12345',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
     assert.equal(invalidPhoneRes.status, 400);
@@ -473,9 +473,9 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'ФТ-11',
         phone: '+7 999 111-22-33',
-        max_contact: '@ivan_photo',
+        max_contact: '+7 900 123-45-67',
         submission_url: 'https://not-yandex.com/invalid-link',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
     assert.equal(badPhotoRes.status, 400);
@@ -491,10 +491,10 @@ describe('Media Center API Tests', () => {
         phone: '+7 999 111-22-33',
         phone_is_max: 'true',
         submission_url: 'https://disk.yandex.ru/d/test-folder',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
-    assert.equal(yandexPhotoRes.status, 201);
+    if(yandexPhotoRes.status !== 201) console.log('ERROR:', yandexPhotoRes); assert.equal(yandexPhotoRes.status, 201);
     const yandexPhotoData = await yandexPhotoRes.json();
     assert.match(yandexPhotoData.public_id, /^MC-P-\d{4}$/);
 
@@ -515,7 +515,7 @@ describe('Media Center API Tests', () => {
       method: 'POST',
       body: photoFormData
     });
-    assert.equal(goodPhotoRes.status, 201);
+    if(goodPhotoRes.status !== 201) console.log('ERROR:', goodPhotoRes); assert.equal(goodPhotoRes.status, 201);
     const goodPhotoData = await goodPhotoRes.json();
     assert.match(goodPhotoData.public_id, /^MC-P-\d{4}$/);
 
@@ -530,10 +530,10 @@ describe('Media Center API Tests', () => {
         phone: '89161234567',
         phone_is_max: true,
         submission_text: 'Яркий пост о наборе первокурсников в МедиаКод! 🚀 Рубрика 1: день из жизни колледжа',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
-    assert.equal(phoneIsMaxRes.status, 201);
+    if(phoneIsMaxRes.status !== 201) console.log('ERROR:', phoneIsMaxRes); assert.equal(phoneIsMaxRes.status, 201);
     const phoneIsMaxData = await phoneIsMaxRes.json();
     assert.match(phoneIsMaxData.public_id, /^MC-S-\d{4}$/);
 
@@ -548,12 +548,12 @@ describe('Media Center API Tests', () => {
         department: trackData.departments[0],
         group_name: 'МТ-21',
         phone: '+7 900 123-45-67',
-        max_contact: '@artem_cut',
+        max_contact: '+7 900 123-45-67',
         submission_url: 'https://disk.yandex.ru/d/artem_montage_test',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
-    assert.equal(strictSlugRes.status, 201);
+    if(strictSlugRes.status !== 201) console.log('ERROR strictSlugRes:', await strictSlugRes.text()); assert.equal(strictSlugRes.status, 201);
     const strictSlugData = await strictSlugRes.json();
     assert.match(strictSlugData.public_id, /^MC-M-\d{4}$/);
 
@@ -565,12 +565,12 @@ describe('Media Center API Tests', () => {
         full_name: 'Дмитрий Монтажев',
         department: trackData.departments[0],
         group_name: 'ИБС-111',
-        phone: '+7 900 360-11-22',
+        phone: '+7 900 360-11-33',
         submission_url: 'https://disk.360.yandex.ru/d/SGu5txgr6xDnZw',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
-    assert.equal(disk360Res.status, 201);
+    if(disk360Res.status !== 201) console.log('ERROR:', disk360Res); assert.equal(disk360Res.status, 201);
     const disk360Data = await disk360Res.json();
     assert.match(disk360Data.public_id, /^MC-M-\d{4}$/);
 
@@ -584,7 +584,7 @@ describe('Media Center API Tests', () => {
         group_name: 'ИБС-111',
         phone: '+7 900 360-11-22',
         submission_url: 'https://drive.google.com/drive/folders/sample',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
     assert.equal(nonYandexRes.status, 400);
@@ -603,10 +603,10 @@ describe('Media Center API Tests', () => {
         portfolio_url: 'https://disk.yandex.ru/d/test_portfolio',
         submission_url: 'https://disk.yandex.ru/d/video_assignment',
         comment: 'Снял и смонтировал короткий ролик о колледже',
-        consent: true
+        phone_is_max: true, consent: true
       })
     });
-    assert.equal(applyRes.status, 201);
+    if(applyRes.status !== 201) console.log('ERROR:', applyRes); assert.equal(applyRes.status, 201);
     const applyResult = await applyRes.json();
     assert.equal(applyResult.ok, true);
     assert.ok(applyResult.public_id);
@@ -657,7 +657,7 @@ describe('Media Center API Tests', () => {
       method: 'POST',
       body: JSON.stringify({}) // no password provided
     });
-    assert.equal(approveRes.status, 201);
+    if(approveRes.status !== 201) console.log('ERROR:', approveRes); assert.equal(approveRes.status, 201);
     const createdLogin = approveRes.data.login || approveRes.data.user.login;
     const tempPassword = approveRes.data.temporaryPassword || approveRes.data.initialPassword;
     assert.ok(createdLogin);

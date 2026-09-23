@@ -20,30 +20,35 @@ export { DEPARTMENTS, RECRUITMENT_TRACKS };
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  login TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('ADMIN','STAFF','STUDENT')),
-  first_name TEXT,
-  last_name TEXT,
-  middle_name TEXT,
-  email TEXT,
-  group_name TEXT,
-  department TEXT,
-  year INTEGER,
-  bio TEXT,
-  phone TEXT,
-  max_contact TEXT,
-  skills TEXT,
-  status TEXT DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','INACTIVE','SUSPENDED')),
-  theme TEXT DEFAULT 'system',
-  must_change_password INTEGER DEFAULT 0,
-  max_user_id TEXT,
-  max_username TEXT,
-  max_contact_verified INTEGER DEFAULT 0,
-  phone_verified INTEGER DEFAULT 0,
-  joined_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    login TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('ADMIN','STAFF','STUDENT')),
+    first_name TEXT,
+    last_name TEXT,
+    middle_name TEXT,
+    email TEXT,
+    group_name TEXT,
+    department TEXT,
+    year INTEGER,
+    bio TEXT,
+    phone TEXT,
+    max_contact TEXT,
+    skills TEXT,
+    status TEXT DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','DISABLED')),
+    theme TEXT DEFAULT 'system' CHECK(theme IN ('light','dark','system')),
+    joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    max_user_id INTEGER,
+    max_username TEXT,
+    max_contact_verified INTEGER DEFAULT 0,
+    phone_verified INTEGER DEFAULT 0,
+    must_change_password INTEGER DEFAULT 0,
+    activation_token TEXT,
+    privacy_consent_at TEXT DEFAULT NULL,
+    privacy_policy_version TEXT DEFAULT NULL,
+    activation_attempts INTEGER DEFAULT 0,
+    activation_locked_until TEXT DEFAULT NULL
+  );
 
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,27 +308,27 @@ export function seed() {
 
   if (usersCount === 0) {
     const insUser = db.prepare(`
-      INSERT INTO users (login, password_hash, role, first_name, last_name, email, group_name, year, bio, skills, phone, max_contact)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (login, password_hash, role, first_name, last_name, email, group_name, year, bio, skills, phone, max_contact, privacy_consent_at, privacy_policy_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, '2026-09')
     `);
 
     adminId = insUser.run(
       'admin', pw, 'ADMIN', 'Мария', 'Соколова', 'admin@college.local',
       null, null, 'Главный администратор медиацентра', 'Координация, Управление, Архитектура медиа',
-      '+7 (900) 100-20-30', 'mariasokol'
+      '+79001002030', 'mariasokol'
     ).lastInsertRowid;
 
     staffId = insUser.run(
       'staff', pw, 'STAFF', 'Алексей', 'Волков', 'staff@college.local',
       null, null, 'Сотрудник медиацентра и студенческих проектов', 'Продюсирование, Видеопроизводство, Фотография',
-      '+7 (900) 200-30-40', 'alex_volkov'
+      '+79002003040', 'alex_volkov'
     ).lastInsertRowid;
 
     const students = [
-      ['student', 'Иван', 'Петров', 'media-21', 2, 'Фотограф и видеограф, люблю репортажную съёмку и портреты.', 'Фотография, Видеосъёмка, Свет, Lightroom', '+7 (916) 123-45-67', 'ivan_petrov'],
-      ['anna', 'Анна', 'Кузнецова', 'media-22', 1, 'SMM-специалист и графический дизайнер, веду соцсети колледжа.', 'SMM, Копирайтинг, Figma, Дизайн постов', '+7 (916) 234-56-78', 'anna_kuzn'],
-      ['dmitry', 'Дмитрий', 'Орлов', 'media-21', 2, 'Видеомонтажёр и звукорежиссёр, работаю в Premiere и After Effects.', 'Монтаж видео, Звук, Premiere Pro, Цветокоррекция', '+7 (916) 345-67-89', 'dmitry_edit'],
-      ['sofia', 'София', 'Морозова', 'media-23', 1, 'Журналист и интервьюер, автор статей для студенческого портала.', 'Интервью, Репортажи, Текст, Ораторское мастерство', '+7 (916) 456-78-90', 'sofia_media']
+      ['student', 'Иван', 'Петров', 'media-21', 2, 'Фотограф и видеограф, люблю репортажную съёмку и портреты.', 'Фотография, Видеосъёмка, Свет, Lightroom', '+79161234567', 'ivan_petrov'],
+      ['anna', 'Анна', 'Кузнецова', 'media-22', 1, 'SMM-специалист и графический дизайнер, веду соцсети колледжа.', 'SMM, Копирайтинг, Figma, Дизайн постов', '+79162345678', 'anna_kuzn'],
+      ['dmitry', 'Дмитрий', 'Орлов', 'media-21', 2, 'Видеомонтажёр и звукорежиссёр, работаю в Premiere и After Effects.', 'Монтаж видео, Звук, Premiere Pro, Цветокоррекция', '+79163456789', 'dmitry_edit'],
+      ['sofia', 'София', 'Морозова', 'media-23', 1, 'Журналист и интервьюер, автор статей для студенческого портала.', 'Интервью, Репортажи, Текст, Ораторское мастерство', '+79164567890', 'sofia_media']
     ];
 
     students.forEach(s => {
