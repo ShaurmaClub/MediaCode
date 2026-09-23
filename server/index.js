@@ -104,10 +104,8 @@ export function safeStudentView(u) {
     department: fullSafe.department,
     bio: fullSafe.bio,
     skills: fullSafe.skills,
-    phone: fullSafe.phone,
     totalPoints: fullSafe.totalPoints,
-    completedTasksCount: fullSafe.completedTasksCount,
-    status: fullSafe.status
+    completedTasksCount: fullSafe.completedTasksCount
   };
 }
 
@@ -1942,7 +1940,7 @@ app.get('/api/record-book/:id', auth, (req, res) => {
 app.get('/api/leaderboard', auth, (req, res) => {
   const rows = db.prepare(`
     SELECT
-      u.id, u.first_name, u.last_name, u.group_name, u.year, u.login, u.skills, u.bio,
+      u.id, u.first_name, u.last_name, u.group_name, u.year, u.skills, u.bio,
       COALESCE(SUM(p.amount), 0) as points,
       (SELECT COUNT(*) FROM applications a WHERE a.user_id = u.id AND a.status = 'COMPLETED') as completed
     FROM users u

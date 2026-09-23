@@ -304,7 +304,7 @@ export default function TaskDetail({ user }) {
               <div className="detail-creator-info">
                 <span className="muted">Сотрудник медиацентра:</span>
                 <b>{task.creator}</b>
-                {task.creator_email && <span className="muted">({task.creator_email})</span>}
+                
               </div>
             )}
           </div>
