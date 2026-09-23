@@ -466,7 +466,7 @@ export function seed() {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insPoint.run(studentIds['student'], 40, 'Съёмка фестиваля Welcome Week', 'EVENT', null, staffId, '2026-09-05 14:30:00');
+  insPoint.run(studentIds['student'], 40, 'Съёмка приветственной недели', 'EVENT', null, staffId, '2026-09-05 14:30:00');
   insPoint.run(studentIds['student'], 20, 'Дизайн серии афиш для Недели Науки', 'COMPLETION', t5, adminId, '2026-09-15 18:20:00');
   insPoint.run(studentIds['anna'], 50, 'Оформление и ведение канала медиацентра', 'SMM', null, staffId, '2026-09-10 11:00:00');
   insPoint.run(studentIds['anna'], 15, 'Бонус за креативную концепцию рилсов', 'BONUS', null, staffId, '2026-09-12 16:15:00');

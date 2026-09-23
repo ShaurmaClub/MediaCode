@@ -131,7 +131,7 @@ export default function RecordBook({ user }) {
       <div className="panel">
         <div className="section-head">
           <div>
-            <h2>История транзакций в ledger</h2>
+            <h2>История начислений</h2>
             <p className="muted">Полная история начислений с указанием куратора и даты.</p>
           </div>
 
