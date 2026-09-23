@@ -122,10 +122,10 @@ export default function Dashboard({ user }) {
     return (
       <Page
         title={`Привет, ${user.first_name}!`}
-        subtitle="Твой персональный медиацентр: актуальные задания, статус заявок и баланс баллов."
+        subtitle="Твой персональный медиацентр: актуальные мероприятия, статус заявок и баланс баллов."
         actions={
           <Link to="/tasks" className="btn primary">
-            <CalendarDays size={16} /> Смотреть задания
+            <CalendarDays size={16} /> Смотреть мероприятия
           </Link>
         }
       >
@@ -139,7 +139,7 @@ export default function Dashboard({ user }) {
                 <span className="score-label">баллов активности</span>
                 <span className="score-dot">·</span>
                 <span className="score-completed">
-                  Выполнено заданий: {data.user.completedTasksCount || 0}
+                  Выполнено мероприятий: {data.user.completedTasksCount || 0}
                 </span>
               </div>
             </div>
@@ -165,12 +165,12 @@ export default function Dashboard({ user }) {
                 <div className="next-event-footer">
                   <span className="task-points-pill">+{nextTask.points} баллов</span>
                   <Link to={`/tasks/${nextTask.id}`} className="text-link">
-                    Перейти к заданию <ArrowUpRight size={15} />
+                    Перейти к мероприятию <ArrowUpRight size={15} />
                   </Link>
                 </div>
               </div>
             ) : (
-              <Empty title="Нет активных заданий" text="Подайте заявку на открытые задания ниже." />
+              <Empty title="Нет активных мероприятий" text="Подайте заявку на открытые мероприятия ниже." />
             )}
           </div>
         </div>
@@ -195,7 +195,7 @@ export default function Dashboard({ user }) {
           <div className="section-head">
             <h2>Возможности для участия</h2>
             <Link to="/tasks" className="text-link">
-              Все задания ({data.tasks?.length || 0}) →
+              Все мероприятия ({data.tasks?.length || 0}) →
             </Link>
           </div>
           {data.tasks && data.tasks.length > 0 ? (
@@ -205,7 +205,7 @@ export default function Dashboard({ user }) {
               ))}
             </div>
           ) : (
-            <Empty title="Пока нет открытых заданий" text="Загляните позже, сотрудники скоро опубликуют новые задания." />
+            <Empty title="Пока нет открытых мероприятий" text="Загляните позже, сотрудники скоро опубликуют новые мероприятия." />
           )}
         </div>
 
@@ -222,7 +222,7 @@ export default function Dashboard({ user }) {
               {data.points && data.points.length > 0 ? (
                 data.points.map((p) => <PointRow key={p.id} point={p} />)
               ) : (
-                <Empty title="Начислений пока нет" text="Выполняйте задания, чтобы получить свои первые баллы." />
+                <Empty title="Начислений пока нет" text="Участвуйте в мероприятиях, чтобы получить свои первые баллы." />
               )}
             </div>
           </div>
@@ -390,7 +390,7 @@ export default function Dashboard({ user }) {
                         )}
                         {app.submission_text && (
                           <span className="material-pill">
-                            <FileText size={12} /> Текст задания
+                            <FileText size={12} /> Текстовый ответ
                           </span>
                         )}
                         {app.comment && (

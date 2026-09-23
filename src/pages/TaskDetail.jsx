@@ -279,7 +279,7 @@ export default function TaskDetail({ user }) {
                 <div className="skill-tags">
                   {task.skills.split(',').map((s, idx) => (
                     <span key={idx} className="skill-pill">
-                      {s.trim()}
+                      {tSkill(s.trim())}
                     </span>
                   ))}
                 </div>

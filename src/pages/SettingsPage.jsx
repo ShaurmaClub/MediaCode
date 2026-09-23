@@ -23,6 +23,10 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
     confirmPassword: ''
   });
   const [savingPass, setSavingPass] = useState(false);
+  const [showPwd1, setShowPwd1] = useState(false);
+  const [showPwd2, setShowPwd2] = useState(false);
+  const [showPwd3, setShowPwd3] = useState(false);
+  const [showPwd4, setShowPwd4] = useState(false);
 
   // Login change form
   const [loginForm, setLoginForm] = useState({
@@ -272,36 +276,48 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
           <form onSubmit={handleChangePassword} className="settings-form">
             <div className="form-group">
               <label>Текущий пароль</label>
-              <input
-                type="password"
-                required
-                placeholder="Введите ваш текущий пароль"
-                value={passForm.currentPassword}
-                onChange={(e) => setPassForm({ ...passForm, currentPassword: e.target.value })}
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPwd1 ? "text" : "password"}
+                  required
+                  placeholder="Введите ваш текущий пароль"
+                  value={passForm.currentPassword}
+                  onChange={(e) => setPassForm({ ...passForm, currentPassword: e.target.value })}
+                  style={{ paddingRight: '40px' }}
+                />
+                <button type="button" onClick={() => setShowPwd1(!showPwd1)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>{showPwd1 ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+              </div>
             </div>
 
             <div className="form-grid-2">
               <div className="form-group">
                 <label>Новый пароль (мин. 6 символов)</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Новый пароль"
-                  value={passForm.newPassword}
-                  onChange={(e) => setPassForm({ ...passForm, newPassword: e.target.value })}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPwd2 ? "text" : "password"}
+                    required
+                    placeholder="Новый пароль"
+                    value={passForm.newPassword}
+                    onChange={(e) => setPassForm({ ...passForm, newPassword: e.target.value })}
+                    style={{ paddingRight: '40px' }}
+                  />
+                  <button type="button" onClick={() => setShowPwd2(!showPwd2)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>{showPwd2 ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                </div>
               </div>
 
               <div className="form-group">
                 <label>Подтвердите новый пароль</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Повторите новый пароль"
-                  value={passForm.confirmPassword}
-                  onChange={(e) => setPassForm({ ...passForm, confirmPassword: e.target.value })}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPwd3 ? "text" : "password"}
+                    required
+                    placeholder="Повторите новый пароль"
+                    value={passForm.confirmPassword}
+                    onChange={(e) => setPassForm({ ...passForm, confirmPassword: e.target.value })}
+                    style={{ paddingRight: '40px' }}
+                  />
+                  <button type="button" onClick={() => setShowPwd3(!showPwd3)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>{showPwd3 ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                </div>
               </div>
             </div>
 
@@ -338,13 +354,17 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
 
               <div className="form-group">
                 <label>Текущий пароль для подтверждения *</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Ваш текущий пароль"
-                  value={loginForm.currentPassword}
-                  onChange={(e) => setLoginForm({ ...loginForm, currentPassword: e.target.value })}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPwd4 ? "text" : "password"}
+                    required
+                    placeholder="Ваш текущий пароль"
+                    value={loginForm.currentPassword}
+                    onChange={(e) => setLoginForm({ ...loginForm, currentPassword: e.target.value })}
+                    style={{ paddingRight: '40px' }}
+                  />
+                  <button type="button" onClick={() => setShowPwd4(!showPwd4)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>{showPwd4 ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                </div>
               </div>
             </div>
 

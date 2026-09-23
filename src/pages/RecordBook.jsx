@@ -127,7 +127,7 @@ export default function RecordBook({ user }) {
         </div>
       </div>
 
-      {/* Ledger Table / List */}
+      {/* История начислений */}
       <div className="panel">
         <div className="section-head">
           <div>
@@ -169,7 +169,7 @@ export default function RecordBook({ user }) {
                 key={p.id}
                 point={p}
                 detailed
-                onReverse={isStaffOrAdmin ? (point) => {
+                onReverse={user?.role === 'ADMIN' ? (point) => {
                   setReversingPoint(point);
                   setReversalReason('');
                 } : null}

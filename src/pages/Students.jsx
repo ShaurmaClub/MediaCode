@@ -1,5 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+
+const SKILL_MAP = {
+  'Photography': 'Фотография',
+  'Interviewing': 'Интервью',
+  'Video': 'Видеосъёмка',
+  'Editing': 'Монтаж',
+  'Design': 'Дизайн',
+  'SMM': 'СММ',
+  'Content': 'Контент',
+  'Smm': 'СММ',
+  'smm': 'СММ'
+};
+function tSkill(s) {
+  return SKILL_MAP[s] || s;
+}
+
 import {
   Search,
   Award,
@@ -125,7 +141,7 @@ export default function Students({ user }) {
   return (
     <Page
       title="Команда медиаволонтёров"
-      subtitle="Каталог участников медиацентра, специализации, зачётки и сезонный рейтинг активности."
+      subtitle="Список участников медиацентра, специализации, зачётки и сезонный рейтинг активности."
       actions={
         <div className="tab-pills-row">
           <button
@@ -133,7 +149,7 @@ export default function Students({ user }) {
             className={`tab-pill-btn ${activeTab === 'directory' ? 'active' : ''}`}
             onClick={() => setActiveTab('directory')}
           >
-            Каталог медиаволонтёров
+            Список медиаволонтёров
           </button>
           <button
             type="button"
@@ -172,7 +188,7 @@ export default function Students({ user }) {
 
           {/* Volunteers Grid */}
           {loading ? (
-            <Loader text="Загружаем каталог медиаволонтёров…" />
+            <Loader text="Загружаем список медиаволонтёров…" />
           ) : students.length > 0 ? (
             <div className="students-grid">
               {students.map((s) => (
@@ -205,7 +221,7 @@ export default function Students({ user }) {
                     {s.skills ? (
                       s.skills.split(',').slice(0, 3).map((sk, idx) => (
                         <span key={idx} className="skill-pill-sm">
-                          {sk.trim()}
+                          {tSkill(sk.trim())}
                         </span>
                       ))
                     ) : (
@@ -457,7 +473,7 @@ export default function Students({ user }) {
                       {studentDetails.user.skills ? (
                         studentDetails.user.skills.split(',').map((sk, idx) => (
                           <span key={idx} className="skill-pill">
-                            {sk.trim()}
+                            {tSkill(sk.trim())}
                           </span>
                         ))
                       ) : (

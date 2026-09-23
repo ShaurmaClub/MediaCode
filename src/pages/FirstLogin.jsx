@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../context/ToastContext.jsx';
-import { KeyRound, User, Lock, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react';
+import { KeyRound, User, Lock, AlertCircle, CheckCircle2, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 export default function FirstLogin({ user, onPasswordChanged }) {
   const [login, setLogin] = useState(user.login || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPwd1, setShowPwd1] = useState(false);
+  const [showPwd2, setShowPwd2] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const toast = useToast();
@@ -106,30 +108,38 @@ export default function FirstLogin({ user, onPasswordChanged }) {
 
           <div className="form-group">
             <label>Новый постоянный пароль *</label>
-            <div className="input-with-icon">
+            <div className="input-with-icon" style={{ position: 'relative' }}>
               <Lock size={16} />
               <input
-                type="password"
+                type={showPwd1 ? "text" : "password"}
                 required
                 autoFocus
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Минимум 6 символов"
+                style={{ paddingRight: '40px' }}
               />
+              <button type="button" onClick={() => setShowPwd1(!showPwd1)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                {showPwd1 ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
 
           <div className="form-group">
             <label>Повторите новый пароль *</label>
-            <div className="input-with-icon">
+            <div className="input-with-icon" style={{ position: 'relative' }}>
               <Lock size={16} />
               <input
-                type="password"
+                type={showPwd2 ? "text" : "password"}
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Повторите пароль"
+                style={{ paddingRight: '40px' }}
               />
+              <button type="button" onClick={() => setShowPwd2(!showPwd2)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                {showPwd2 ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
 

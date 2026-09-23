@@ -264,10 +264,27 @@ app.get('/api/health', (req, res) => {
 app.post('/api/auth/login', authLimiter, (req, res) => {
   const { login, password } = req.body || {};
   if (!login || !password) {
-    return res.status(400).json({ error: 'Укажите логин и пароль' });
+    return res.status(400).json({ error: 'Укажите логин/номер телефона и пароль' });
   }
 
-  const user = db.prepare("SELECT * FROM users WHERE login = ? AND status = 'ACTIVE'").get(String(login).trim().toLowerCase());
+  const rawLogin = String(login).trim();
+  const cleanLogin = rawLogin.toLowerCase();
+  
+  // Try normal login search
+  let user = db.prepare("SELECT * FROM users WHERE login = ? AND status = 'ACTIVE'").get(cleanLogin);
+  
+  // Try phone search
+  if (!user) {
+    const normalizedPhone = normalizeRussianPhone(rawLogin);
+    if (normalizedPhone) {
+      // Check if pending activation
+      const pendingUser = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(normalizedPhone);
+      if (pendingUser) {
+        return res.json({ requiresActivation: true, phone: normalizedPhone });
+      }
+      user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'ACTIVE'").get(normalizedPhone);
+    }
+  }
   if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
     audit(user?.id || null, 'LOGIN_FAILED', 'AUTH', null, { login });
     return res.status(401).json({ error: 'Неверный логин или пароль, либо аккаунт деактивирован' });
@@ -303,7 +320,19 @@ app.get('/api/auth/me', auth, (req, res) => {
 });
 
 app.patch('/api/auth/profile', auth, (req, res) => {
-  const { bio, phone, max_contact, skills, theme } = req.body || {};
+  let { bio, phone, max_contact, skills, theme } = req.body || {};
+  
+  if (req.user.role === 'STUDENT' && phone !== undefined) {
+    return res.status(403).json({ error: 'Смена телефона доступна только администратору' });
+  }
+
+  if (phone !== undefined && phone !== null && String(phone).trim() !== '') {
+    const normalizedPhone = normalizeRussianPhone(String(phone).trim());
+    if (!normalizedPhone) return res.status(400).json({ error: 'Некорректный номер телефона' });
+    const existingPhoneUser = db.prepare('SELECT id FROM users WHERE phone = ? AND id != ?').get(normalizedPhone, req.user.id);
+    if (existingPhoneUser) return res.status(409).json({ error: 'Пользователь с таким номером телефона уже существует.' });
+    phone = normalizedPhone;
+  }
   db.prepare(`
     UPDATE users
     SET bio = COALESCE(?, bio),
@@ -698,6 +727,16 @@ function normalizeRussianPhone(rawPhone) {
     return null;
   }
   return `+${d}`;
+}
+
+function normalizeName(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name.trim().replace(/\s+/g, ' ').split('-').map(part => {
+    return part.split(' ').map(word => {
+      if (!word) return '';
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
+  }).join('-');
 }
 
 // Yandex Disk URL validation helper (supports disk.yandex.ru, disk.360.yandex.ru, yadi.sk)
@@ -1212,6 +1251,10 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
 
   let newUserId;
   const tx = db.transaction(() => {
+    const fName = normalizeName(d.first_name);
+    const lName = normalizeName(d.last_name);
+    const mName = normalizeName(d.middle_name);
+
     const r = db.prepare(`
       INSERT INTO users (
         login, password_hash, role, first_name, last_name, middle_name,
@@ -1823,7 +1866,7 @@ app.post('/api/points/award', auth, role('STAFF', 'ADMIN'), (req, res) => {
 });
 
 // Staff / Admin reverses points transaction
-app.post('/api/points/:id/reverse', auth, role('STAFF', 'ADMIN'), (req, res) => {
+app.post('/api/points/:id/reverse', auth, role('ADMIN'), (req, res) => {
   const pointId = req.params.id;
   const original = db.prepare('SELECT * FROM points WHERE id = ?').get(pointId);
   if (!original) return res.status(404).json({ error: 'Запись начисления не найдена' });
@@ -2091,6 +2134,15 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
   }
 
   const cleanLogin = String(d.login).trim().toLowerCase();
+  
+  if (d.phone && d.phone.trim()) {
+    const normalizedPhone = normalizeRussianPhone(d.phone.trim());
+    if (!normalizedPhone) return res.status(400).json({ error: 'Некорректный номер телефона' });
+    const existingPhoneUser = db.prepare('SELECT id FROM users WHERE phone = ?').get(normalizedPhone);
+    if (existingPhoneUser) return res.status(409).json({ error: 'Пользователь с таким номером телефона уже существует.' });
+    d.phone = normalizedPhone;
+  }
+
   const validRoles = ['ADMIN', 'STAFF', 'STUDENT'];
   const userRole = validRoles.includes(d.role) ? d.role : 'STUDENT';
 
@@ -2105,9 +2157,9 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
       cleanLogin,
       pwHash,
       userRole,
-      d.first_name ? d.first_name.trim() : '',
-      d.last_name ? d.last_name.trim() : '',
-      d.middle_name ? d.middle_name.trim() : '',
+      fName,
+      lName,
+      mName,
       d.email ? d.email.trim().toLowerCase() : '',
       d.group_name ? d.group_name.trim() : '',
       d.year ? parseInt(d.year, 10) : null,
@@ -2139,6 +2191,75 @@ app.post('/api/users', auth, role('ADMIN'), (req, res) => {
   }
 });
 
+// Mass Create (Admin only)
+app.post('/api/users/mass-create', auth, role('ADMIN'), (req, res) => {
+  const { phones } = req.body;
+  if (!Array.isArray(phones)) return res.status(400).json({ error: 'phones must be an array' });
+
+  const added = [];
+  const errors = [];
+
+  for (const p of phones) {
+    const np = normalizeRussianPhone(p);
+    if (!np) { errors.push({ phone: p, error: 'Неверный формат номера' }); continue; }
+    
+    const exist = db.prepare('SELECT id FROM users WHERE phone = ?').get(np);
+    if (exist) { errors.push({ phone: np, error: 'Уже существует' }); continue; }
+    
+    const token = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const tempLogin = 'pending_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    
+    db.prepare(`
+      INSERT INTO users (login, password_hash, role, phone, status, activation_token, must_change_password)
+      VALUES (?, '', 'STUDENT', ?, 'PENDING_ACTIVATION', ?, 0)
+    `).run(tempLogin, np, token);
+    
+    added.push({ phone: np, token });
+  }
+
+  res.json({ added, errors });
+});
+
+app.post('/api/auth/activation-check', (req, res) => {
+  const { phone, token } = req.body;
+  const np = normalizeRussianPhone(phone);
+  if (!np) return res.status(400).json({error: 'Неверный формат номера'});
+  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
+  if (!user) return res.status(404).json({error: 'Номер телефона не найден или уже активирован'});
+  if (user.activation_token !== String(token).trim()) return res.status(400).json({error: 'Неверный код активации'});
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/activate', (req, res) => {
+  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password } = req.body;
+  const np = normalizeRussianPhone(phone);
+  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
+  if (!user || user.activation_token !== String(token).trim()) return res.status(400).json({error: 'Неверный код активации или пользователь не найден'});
+
+  if (!first_name || !last_name || !department || !group_name || !login || !password) {
+    return res.status(400).json({error: 'Заполните все обязательные поля'});
+  }
+
+  const cyrillicFioRegex = /^[А-Яа-яЁё\s-]+$/;
+  if (!cyrillicFioRegex.test(first_name.trim()) || !cyrillicFioRegex.test(last_name.trim())) {
+    return res.status(400).json({ error: 'Имя и фамилия должны быть написаны русскими буквами' });
+  }
+
+  const cleanLogin = String(login).trim().toLowerCase();
+  const existingLogin = db.prepare("SELECT id FROM users WHERE login = ?").get(cleanLogin);
+  if (existingLogin) return res.status(409).json({error: 'Этот логин уже занят'});
+
+  const hash = require('bcryptjs').hashSync(password, 10);
+  
+  db.prepare(`
+    UPDATE users 
+    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL 
+    WHERE id=?
+  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, user.id);
+  
+  res.json({ok: true, message: 'Аккаунт активирован. Вы можете войти.'});
+});
+
 // Update user (Admin only)
 app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
   const targetId = req.params.id;
@@ -2154,6 +2275,18 @@ app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
   }
 
   const d = req.body || {};
+  if (d.first_name) d.first_name = normalizeName(d.first_name);
+  if (d.last_name) d.last_name = normalizeName(d.last_name);
+  if (d.middle_name) d.middle_name = normalizeName(d.middle_name);
+
+  if (d.phone !== undefined && d.phone !== null && String(d.phone).trim() !== '') {
+    const normalizedPhone = normalizeRussianPhone(String(d.phone).trim());
+    if (!normalizedPhone) return res.status(400).json({ error: 'Некорректный номер телефона' });
+    const existingPhoneUser = db.prepare('SELECT id FROM users WHERE phone = ? AND id != ?').get(normalizedPhone, targetId);
+    if (existingPhoneUser) return res.status(409).json({ error: 'Пользователь с таким номером телефона уже существует.' });
+    d.phone = normalizedPhone;
+  }
+
   db.prepare(`
     UPDATE users SET
       role = COALESCE(?, role),
@@ -2162,6 +2295,7 @@ app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
       last_name = COALESCE(?, last_name),
       middle_name = COALESCE(?, middle_name),
       email = COALESCE(?, email),
+      department = COALESCE(?, department),
       group_name = COALESCE(?, group_name),
       year = COALESCE(?, year),
       bio = COALESCE(?, bio),
@@ -2172,7 +2306,7 @@ app.patch('/api/users/:id', auth, role('ADMIN'), (req, res) => {
     WHERE id = ?
   `).run(
     d.role, d.status, d.first_name, d.last_name, d.middle_name,
-    d.email, d.group_name, d.year, d.bio, d.skills, d.phone, d.max_contact, d.theme,
+    d.email, d.department, d.group_name, d.year, d.bio, d.skills, d.phone, d.max_contact, d.theme,
     targetId
   );
 

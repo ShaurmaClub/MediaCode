@@ -2,11 +2,18 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../context/ToastContext.jsx';
-import { Sparkles, ArrowRight, Shield, Camera, KeyRound, HelpCircle, X, Check } from 'lucide-react';
+import { Sparkles, ArrowRight, Shield, Camera, KeyRound, HelpCircle, X, Check, Eye, EyeOff } from 'lucide-react';
 import Modal from '../components/Modal.jsx';
 
 export default function Login({ onLogin }) {
   const [form, setForm] = useState({ login: '', password: '' });
+  const [activationMode, setActivationMode] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showActPassword, setShowActPassword] = useState(false);
+  const [activationPhone, setActivationPhone] = useState('');
+  const [actForm, setActForm] = useState({
+    token: '', first_name: '', last_name: '', department: '', group_name: '', login: '', password: ''
+  });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -18,7 +25,7 @@ export default function Login({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.login || !form.password) {
-      setError('Заполните логин и пароль');
+      setError('Заполните логин/телефон и пароль');
       return;
     }
 
@@ -61,6 +68,103 @@ export default function Login({ onLogin }) {
     }
   };
 
+  const handleActivate = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/auth/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: activationPhone, ...actForm })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Ошибка активации');
+      toast.success(data.message);
+      setActivationMode(false);
+      setForm({ login: actForm.login, password: actForm.password });
+    } catch (err) {
+      setError(err.message);
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (activationMode) {
+    return (
+      <div className="login-page">
+        <div className="login-card-wrapper" style={{ margin: '0 auto', flex: 1, display: 'flex', justifyContent: 'center' }}>
+          <form className="login-card" style={{ width: '450px' }} onSubmit={handleActivate}>
+            <div className="login-card-header">
+              <div className="eyebrow">АКТИВАЦИЯ АККАУНТА</div>
+              <h2>Регистрация медиаволонтёра</h2>
+              <p className="muted">Ваш номер <b>{activationPhone}</b> найден. Пожалуйста, заполните профиль для завершения регистрации.</p>
+            </div>
+
+            {error && <div className="error-banner">{error}</div>}
+
+            <div className="form-group">
+              <label>Код активации (6 символов) <span className="required">*</span></label>
+              <input type="text" required value={actForm.token} onChange={e => setActForm({...actForm, token: e.target.value.toUpperCase()})} placeholder="Например: A1B2C3" maxLength={6} />
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Имя <span className="required">*</span></label>
+                <input type="text" required value={actForm.first_name} onChange={e => setActForm({...actForm, first_name: e.target.value})} placeholder="Иван" />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Фамилия <span className="required">*</span></label>
+                <input type="text" required value={actForm.last_name} onChange={e => setActForm({...actForm, last_name: e.target.value})} placeholder="Иванов" />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Отделение <span className="required">*</span></label>
+                <select required value={actForm.department} onChange={e => setActForm({...actForm, department: e.target.value})}>
+                  <option value="">Выберите отделение</option>
+                  <option value="Учебное отделение «Моссовет»">Учебное отделение «Моссовет»</option>
+                  <option value="Учебное отделение «Датахаб»">Учебное отделение «Датахаб»</option>
+                  <option value="Учебное отделение «Техно»">Учебное отделение «Техно»</option>
+                  <option value="Учебное отделение «Протон»">Учебное отделение «Протон»</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ width: '120px' }}>
+                <label>Группа <span className="required">*</span></label>
+                <input type="text" required value={actForm.group_name} onChange={e => setActForm({...actForm, group_name: e.target.value})} placeholder="ИС-21" />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Желаемый логин <span className="required">*</span></label>
+              <input type="text" required value={actForm.login} onChange={e => setActForm({...actForm, login: e.target.value})} placeholder="ivan_petrov" />
+              <small className="muted">Используйте латинские буквы и цифры</small>
+            </div>
+
+            <div className="form-group">
+              <label>Пароль <span className="required">*</span></label>
+              <div style={{ position: 'relative' }}>
+                <input type={showActPassword ? 'text' : 'password'} required minLength="6" value={actForm.password} onChange={e => setActForm({...actForm, password: e.target.value})} placeholder="Минимум 6 символов" style={{ width: '100%', paddingRight: '40px' }} />
+                <button type="button" onClick={() => setShowActPassword(!showActPassword)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                  {showActPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" className="btn primary" style={{ width: '100%', marginTop: '8px' }} disabled={busy}>
+              {busy ? 'Активация...' : 'Активировать аккаунт'}
+            </button>
+            <button type="button" className="btn ghost" style={{ width: '100%', marginTop: '8px' }} onClick={() => setActivationMode(false)}>
+              Вернуться ко входу
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="login-page">
       <div className="login-art">
@@ -102,7 +206,7 @@ export default function Login({ onLogin }) {
           {error && <div className="error-banner">{error}</div>}
 
           <div className="form-group">
-            <label htmlFor="login-input">Логин пользователя</label>
+            <label htmlFor="login-input">Логин или номер телефона</label>
             <input
               id="login-input"
               type="text"
@@ -110,7 +214,7 @@ export default function Login({ onLogin }) {
               autoFocus
               value={form.login}
               onChange={(e) => setForm({ ...form, login: e.target.value })}
-              placeholder="Введите ваш логин"
+              placeholder="Например: ivan_petrov или +7 (900) 000-00-00"
             />
           </div>
 
@@ -159,48 +263,17 @@ export default function Login({ onLogin }) {
           title="Восстановление доступа"
           onClose={() => setShowResetModal(false)}
         >
-          {resetSuccess ? (
-            <div style={{ textAlign: 'center', padding: '16px 0' }}>
-              <div style={{
-                width: '48px', height: '48px', borderRadius: '50%', background: 'var(--success-bg)',
-                color: 'var(--success)', display: 'grid', placeItems: 'center', margin: '0 auto 16px'
-              }}>
-                <Check size={24} />
-              </div>
-              <h4 style={{ marginBottom: '8px' }}>Запрос зарегистрирован</h4>
-              <p className="muted" style={{ fontSize: '14px', lineHeight: 1.5, marginBottom: '20px' }}>
-                {resetSuccess}
-              </p>
-              <button type="button" className="btn primary wide" onClick={() => setShowResetModal(false)}>
-                Понятно
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleRequestReset}>
-              <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '16px' }}>
-                Укажите ваш логин или номер телефона. Администратор или сотрудник медиацентра оперативно свяжется с вами для подтверждения личности и выдачи нового пароля.
-              </p>
-              <div className="form-group">
-                <label>Логин или номер телефона *</label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="Например: ivan_petrov или +7 (916) 123-45-67"
-                  value={resetContact}
-                  onChange={(e) => setResetContact(e.target.value)}
-                />
-              </div>
-              <div className="modal-actions" style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px' }}>
-                <button type="button" className="btn ghost" onClick={() => setShowResetModal(false)}>
-                  Отмена
-                </button>
-                <button type="submit" className="btn primary" disabled={resetBusy}>
-                  {resetBusy ? 'Отправка…' : 'Отправить запрос'}
-                </button>
-              </div>
-            </form>
-          )}
+          <div style={{ textAlign: 'center', padding: '8px 0' }}>
+            <p style={{ fontSize: '15px', lineHeight: 1.6, marginBottom: '16px' }}>
+              Для восстановления доступа к аккаунту обратитесь к руководителю медиацентра (сотруднику) в Telegram или ВКонтакте.
+            </p>
+            <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '24px' }}>
+              Сотрудник проверит вашу личность, сгенерирует новый временный пароль и отправит его вам лично. Это необходимо в целях безопасности платформы.
+            </p>
+            <button type="button" className="btn primary wide" onClick={() => setShowResetModal(false)}>
+              Понятно, закрыть
+            </button>
+          </div>
         </Modal>
       )}
     </div>

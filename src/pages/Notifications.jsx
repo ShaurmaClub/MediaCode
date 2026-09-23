@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, CheckCheck, ExternalLink, CalendarDays, Award } from 'lucide-react';
+import { Bell, CheckCheck, ExternalLink, CalendarDays, Award, Sparkles } from 'lucide-react';
 import { api, relativeTime } from '../api.js';
 import { Page, Loader, Empty } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -30,8 +30,8 @@ export default function Notifications() {
   const handleMarkAllRead = async () => {
     try {
       setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
-      window.dispatchEvent(new CustomEvent('notifications-updated'));
       await api('/notifications/read-all', { method: 'POST' });
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
       toast.success('Все уведомления отмечены как прочитанные');
     } catch (err) {
       toast.error(err.message);
@@ -44,9 +44,9 @@ export default function Notifications() {
       setNotifications((prev) =>
         prev.map((n) => (n.id === notif.id ? { ...n, read_at: new Date().toISOString() } : n))
       );
-      window.dispatchEvent(new CustomEvent('notifications-updated'));
       try {
         await api(`/notifications/${notif.id}/read`, { method: 'PATCH' });
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
       } catch {}
     }
     if (notif.link) {

@@ -56,7 +56,7 @@ export const StatusBadge = ({ status }) => {
     CANCELLED: { label: 'Отменено', cls: 'status-cancelled' },
     ARCHIVED: { label: 'В архиве', cls: 'status-archived' },
     APPLIED: { label: 'Заявка подана', cls: 'status-applied' },
-    SELECTED: { label: 'Отобран', cls: 'status-selected' },
+    SELECTED: { label: 'Выбран', cls: 'status-selected' },
     REJECTED: { label: 'Отклонена', cls: 'status-rejected' },
     WITHDRAWN: { label: 'Отозвана', cls: 'status-withdrawn' },
     IN_PROGRESS: { label: 'В процессе', cls: 'status-progress' },

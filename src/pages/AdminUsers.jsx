@@ -29,6 +29,11 @@ export default function AdminUsers({ currentUser }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [massCreateModalOpen, setMassCreateModalOpen] = useState(false);
+  const [massPhones, setMassPhones] = useState('');
+  const [massResult, setMassResult] = useState(null);
+  const [showPwd1, setShowPwd1] = useState(false);
+  const [showPwd2, setShowPwd2] = useState(false);
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const toast = useToast();
@@ -59,6 +64,25 @@ export default function AdminUsers({ currentUser }) {
 
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const handleMassCreate = async (e) => {
+    e.preventDefault();
+    if (!massPhones.trim()) return toast.error('Введите номера телефонов');
+    const phonesArr = massPhones.split('\n').map(p => p.trim()).filter(Boolean);
+    if (phonesArr.length === 0) return toast.error('Номера не найдены');
+    setBusy(true);
+    try {
+      const res = await api('/users/mass-create', { method: 'POST', body: JSON.stringify({ phones: phonesArr }) });
+      setMassResult(res);
+      setMassPhones('');
+      loadUsers();
+      toast.success('Завершено. Проверьте результаты.');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -193,9 +217,14 @@ export default function AdminUsers({ currentUser }) {
       title="Управление пользователями"
       subtitle="Администрирование учётных записей, распределение ролей и контроль статуса доступа."
       actions={
-        <button className="btn primary" onClick={() => setCreateModalOpen(true)}>
-          <UserPlus size={16} /> Создать пользователя
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn secondary" onClick={() => setMassCreateModalOpen(true)}>
+            <UserPlus size={16} /> Массовое добавление по номерам
+          </button>
+          <button className="btn primary" onClick={() => setCreateModalOpen(true)}>
+            <UserPlus size={16} /> Создать пользователя
+          </button>
+        </div>
       }
     >
       {/* Search & Filter Toolbar */}
@@ -315,7 +344,7 @@ export default function AdminUsers({ currentUser }) {
                           title="Сбросить пароль"
                           onClick={() => {
                             setPasswordModalUser(u);
-                            setNewPassword('Demo123!');
+                            setNewPassword('');
                           }}
                         >
                           <Key size={13} />

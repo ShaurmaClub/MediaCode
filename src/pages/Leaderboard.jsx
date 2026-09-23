@@ -23,7 +23,7 @@ export default function Leaderboard({ user }) {
 
   return (
     <Page
-      title="Рейтинг медиаволонтёров медиацентра"
+      title="Рейтинг медиаволонтёров"
       subtitle="Прозрачная система поощрения вклада студентов. Расти в рейтинге, создавай медиа и побеждай в сезоне!"
     >
       {/* Podium for Top 3 */}
@@ -46,7 +46,7 @@ export default function Leaderboard({ user }) {
                 <div className="podium-score">
                   <strong>{top3[1].points}</strong> <small>баллов</small>
                 </div>
-                <span className="podium-completed">{top3[1].completed} заданий</span>
+                <span className="podium-completed">{formatEventsWord(top3[1].completed)}</span>
               </div>
             )}
 
@@ -67,7 +67,7 @@ export default function Leaderboard({ user }) {
                 <div className="podium-score gold">
                   <strong>{top3[0].points}</strong> <small>баллов</small>
                 </div>
-                <span className="podium-completed">{top3[0].completed} заданий</span>
+                <span className="podium-completed">{formatEventsWord(top3[0].completed)}</span>
               </div>
             )}
 
@@ -87,7 +87,7 @@ export default function Leaderboard({ user }) {
                 <div className="podium-score">
                   <strong>{top3[2].points}</strong> <small>баллов</small>
                 </div>
-                <span className="podium-completed">{top3[2].completed} заданий</span>
+                <span className="podium-completed">{formatEventsWord(top3[2].completed)}</span>
               </div>
             )}
           </div>
