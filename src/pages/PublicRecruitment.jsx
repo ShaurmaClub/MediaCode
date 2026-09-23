@@ -608,10 +608,10 @@ export default function PublicRecruitment() {
                     </div>
 
                     {/* ONLY MONTAGE has materials button! Never show for photo, video, design, smm, content */}
-                    {effectiveSlug === 'montage' && trackData.materials_url && (
+                    {effectiveSlug === 'montage' && (
                       <div className="materials-btn-block" style={{ marginTop: '16px' }}>
                         <a
-                          href={trackData.materials_url}
+                          href="https://disk.360.yandex.ru/d/SGu5txgr6xDnZw"
                           target="_blank"
                           rel="noopener noreferrer"
                           className="btn primary sm"

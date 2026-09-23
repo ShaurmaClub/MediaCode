@@ -219,6 +219,13 @@ ensureColumn('points', 'reversal_of_id', 'INTEGER');
 ensureColumn('points', 'reversal_reason', 'TEXT');
 ensureColumn('points', 'is_reversed', 'INTEGER DEFAULT 0');
 
+// Ensure canonical recruitment tracks materials URLs
+db.exec(`
+  UPDATE recruitment_tracks
+  SET materials_url = 'https://disk.360.yandex.ru/d/SGu5txgr6xDnZw'
+  WHERE slug = 'montage';
+`);
+
 export function seed() {
   const usersCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   const pw = bcrypt.hashSync('Demo123!', 10);
