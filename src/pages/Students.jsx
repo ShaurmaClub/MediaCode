@@ -406,19 +406,6 @@ export default function Students({ user }) {
                         <Phone size={13} /> {studentDetails.user.phone}
                       </a>
                     )}
-                    {studentDetails.user.max_contact &&
-                      studentDetails.user.max_contact !== studentDetails.user.phone &&
-                      !studentDetails.user.max_contact.startsWith('@') && (
-                        <span className="contact-chip">
-                          <MessageSquare size={13} /> Макс: {studentDetails.user.max_contact}
-                        </span>
-                      )}
-                    {(studentDetails.user.max_contact === studentDetails.user.phone ||
-                      studentDetails.user.phone_is_max) && (
-                      <span className="contact-chip" title="Этот номер телефона используется в Макс">
-                        <MessageSquare size={13} /> Макс на этом номере
-                      </span>
-                    )}
                   </div>
                 </div>
 
