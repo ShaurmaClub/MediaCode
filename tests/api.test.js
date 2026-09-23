@@ -120,10 +120,20 @@ describe('Media Center API Tests', () => {
     const withdrawRes = await student.request('/api/tasks/2/withdraw', { method: 'POST' });
     assert.equal(withdrawRes.status, 200);
 
-    // Check record book
+    // Check record book of self
     const rbRes = await student.request('/api/record-book');
     assert.equal(rbRes.status, 200);
     assert.ok(Array.isArray(rbRes.data.points));
+
+    // Can view another active student's record book
+    const otherRbRes = await student.request('/api/record-book/4');
+    assert.equal(otherRbRes.status, 200);
+    assert.ok(Array.isArray(otherRbRes.data.points));
+
+    // Can view another active student's profile with pointsHistory
+    const otherProfileRes = await student.request('/api/users/4');
+    assert.equal(otherProfileRes.status, 200);
+    assert.ok(Array.isArray(otherProfileRes.data.pointsHistory));
 
     // Leaderboard
     const lbRes = await student.request('/api/leaderboard');
@@ -162,6 +172,10 @@ describe('Media Center API Tests', () => {
       body: JSON.stringify({ login: 'newadmin', password: 'Password123!', role: 'ADMIN' })
     });
     assert.equal(userRes.status, 403);
+
+    // Cannot access STAFF/ADMIN record book
+    const staffRbRes = await student.request('/api/record-book/2'); // user 2 is staff
+    assert.equal(staffRbRes.status, 403);
   });
 
   test('STAFF flow: create task, select applicant, complete task, prevent duplicate points', async () => {
@@ -316,19 +330,21 @@ describe('Media Center API Tests', () => {
     ]);
     assert.ok(trackData.maxUploadSizeMB > 0);
 
-    // 1b. Check design track details (1-я Мясниковская улица, дом 16, metro, mandatory registration, no materials button)
+    // 1b. Check design track details (1-я Мясниковская улица, дом 16, metro, mandatory registration, no materials button, NO Figma)
     const designTrackRes = await fetch(baseUrl + '/api/public/recruitment/track/design');
     const designTrack = await designTrackRes.json();
     assert.ok(designTrack.track.instructions.includes('1-я Мясниковская улица, дом 16'));
     assert.ok(designTrack.track.instructions.includes('Бульвар Рокоссовского'));
     assert.ok(designTrack.track.instructions.includes('Преображенская площадь'));
     assert.ok(designTrack.track.instructions.includes('Регистрация обязательна'));
+    assert.equal(designTrack.track.instructions.includes('Figma'), false);
     assert.equal(designTrack.track.materials_url, null); // Design has NO materials button
 
-    // 1c. Check montage track materials_url (ONLY track with materials)
+    // 1c. Check montage track materials_url (ONLY track with materials, pointing to disk.360.yandex.ru)
     const montageTrackRes = await fetch(baseUrl + '/api/public/recruitment/track/montage');
     const montageTrack = await montageTrackRes.json();
     assert.ok(montageTrack.track.materials_url);
+    assert.equal(montageTrack.track.materials_url, 'https://disk.360.yandex.ru/d/SGu5txgr6xDnZw');
 
     // 1d. Check SMM and Content track canonical names
     const smmTrackRes = await fetch(baseUrl + '/api/public/recruitment/track/smm');
@@ -521,6 +537,38 @@ describe('Media Center API Tests', () => {
     const strictSlugData = await strictSlugRes.json();
     assert.match(strictSlugData.public_id, /^MC-M-\d{4}$/);
 
+    // 4e. Yandex Disk 360 link (disk.360.yandex.ru) is accepted
+    const disk360Res = await fetch(baseUrl + '/api/public/recruitment/apply/montage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        full_name: 'Дмитрий Монтажев',
+        department: trackData.departments[0],
+        group_name: 'ИБС-111',
+        phone: '+7 900 360-11-22',
+        submission_url: 'https://disk.360.yandex.ru/d/SGu5txgr6xDnZw',
+        consent: true
+      })
+    });
+    assert.equal(disk360Res.status, 201);
+    const disk360Data = await disk360Res.json();
+    assert.match(disk360Data.public_id, /^MC-M-\d{4}$/);
+
+    // 4f. Non-Yandex link must fail with 400
+    const nonYandexRes = await fetch(baseUrl + '/api/public/recruitment/apply/montage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        full_name: 'Дмитрий Монтажев',
+        department: trackData.departments[0],
+        group_name: 'ИБС-111',
+        phone: '+7 900 360-11-22',
+        submission_url: 'https://drive.google.com/drive/folders/sample',
+        consent: true
+      })
+    });
+    assert.equal(nonYandexRes.status, 400);
+
     // 5. Successful public application submission
     const candidateName = 'Игорь Тестовый Кандидат';
     const applyRes = await fetch(baseUrl + '/api/public/recruitment/apply/video', {
@@ -584,28 +632,34 @@ describe('Media Center API Tests', () => {
     });
     assert.equal(inReviewRes.status, 200);
 
-    // 10. Staff approves candidate and creates student account
+    // 10. Staff approves candidate without password (auto-generating secure random password, no Demo123!)
     const approveRes = await staff.request(`/api/recruitment/applications/${foundApp.id}/approve-and-create-user`, {
       method: 'POST',
-      body: JSON.stringify({ password: 'Demo123!' })
+      body: JSON.stringify({}) // no password provided
     });
     assert.equal(approveRes.status, 201);
     const createdLogin = approveRes.data.login || approveRes.data.user.login;
+    const tempPassword = approveRes.data.temporaryPassword || approveRes.data.initialPassword;
     assert.ok(createdLogin);
+    assert.ok(tempPassword);
+    assert.notEqual(tempPassword, 'Demo123!');
+    assert.match(tempPassword, /^MC_[a-f0-9]{8}Aa1!$/);
+    assert.equal(approveRes.data.user.email, null);
+    assert.equal(approveRes.data.user.bio.includes('Принят по заявке'), false);
     assert.equal(approveRes.data.user.role, 'STUDENT');
 
     // 11. Duplicate approval prevention: Second attempt must fail with 400
     const dupApproveRes = await staff.request(`/api/recruitment/applications/${foundApp.id}/approve-and-create-user`, {
       method: 'POST',
-      body: JSON.stringify({ password: 'Demo123!' })
+      body: JSON.stringify({ password: 'CustomPassword123!' })
     });
     assert.equal(dupApproveRes.status, 400);
 
-    // 12. Newly created student logs in and verifies account & welcome points
+    // 12. Newly created student logs in with temporary password and verifies account & welcome points
     const newStudent = new SessionClient();
     const newLoginRes = await newStudent.request('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ login: createdLogin, password: 'Demo123!' })
+      body: JSON.stringify({ login: createdLogin, password: tempPassword })
     });
     assert.equal(newLoginRes.status, 200);
     assert.equal(newLoginRes.data.user.role, 'STUDENT');
