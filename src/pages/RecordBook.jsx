@@ -132,7 +132,7 @@ export default function RecordBook({ user }) {
         <div className="section-head">
           <div>
             <h2>История начислений</h2>
-            <p className="muted">Полная история начислений с указанием куратора и даты.</p>
+            <p className="muted">Полная история начислений с указанием сотрудника и даты.</p>
           </div>
 
           <div className="toolbar-inline">
@@ -208,7 +208,7 @@ export default function RecordBook({ user }) {
                 rows="3"
                 required
                 autoFocus
-                placeholder="Например: ошибочное дублирование начисления куратором"
+                placeholder="Например: ошибочное дублирование начисления сотрудником"
                 value={reversalReason}
                 onChange={(e) => setReversalReason(e.target.value)}
               />

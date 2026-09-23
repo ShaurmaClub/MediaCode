@@ -559,7 +559,7 @@ export default function TaskForm({ user }) {
               </div>
 
               <div className="form-group">
-                <label>Внутренние примечания и контакты куратора</label>
+                <label>Внутренние примечания и контакты сотрудника</label>
                 <textarea
                   rows="2"
                   placeholder="Особые инструкции для медиаволонтёров, дресс-код, ссылки на чат…"

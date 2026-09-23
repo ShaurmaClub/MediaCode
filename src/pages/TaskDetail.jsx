@@ -116,7 +116,7 @@ export default function TaskDetail({ user }) {
         method: 'POST',
         body: JSON.stringify({ submission_notes: submissionNotes })
       });
-      toast.success('Отчёт о выполнении передан куратору на проверку!');
+      toast.success('Отчёт о выполнении передан сотруднику на проверку!');
       setSubmissionNotes('');
       loadTask();
     } catch (err) {
@@ -295,7 +295,7 @@ export default function TaskDetail({ user }) {
 
             {task.creator && (
               <div className="detail-creator-info">
-                <span className="muted">Куратор задания:</span>
+                <span className="muted">Сотрудник медиацентра:</span>
                 <b>{task.creator}</b>
                 {task.creator_email && <span className="muted">({task.creator_email})</span>}
               </div>
@@ -312,7 +312,7 @@ export default function TaskDetail({ user }) {
                     <form onSubmit={handleApply}>
                       <h3>Хотите участвовать в этом задании?</h3>
                       <p className="muted">
-                        Выберите желаемую позицию и при необходимости оставьте комментарий куратору (например, о технике или опыте).
+                        Выберите желаемую позицию и при необходимости оставьте комментарий сотруднику (например, о технике или опыте).
                       </p>
 
                       {parsedRoles.length > 0 && (
@@ -367,7 +367,7 @@ export default function TaskDetail({ user }) {
                     <Clock size={22} className="part-icon" />
                     <div>
                       <h3>Ваша заявка на рассмотрении</h3>
-                      <p className="muted">Куратор рассматривает отклики и скоро свяжется с вами.</p>
+                      <p className="muted">Сотрудник рассматривает отклики и скоро свяжется с вами.</p>
                     </div>
                   </div>
                   {myApp.comment && (
@@ -389,7 +389,7 @@ export default function TaskDetail({ user }) {
                     <div>
                       <h3>Поздравляем! Вы выбраны медиаволонтёром!</h3>
                       <p>
-                        Вы утверждены для участия в задании. Пожалуйста, будьте на связи с куратором.
+                        Вы утверждены для участия в задании. Пожалуйста, будьте на связи с сотрудником.
                         После завершения работы отправьте ссылку на материалы или краткий отчёт.
                       </p>
                     </div>
@@ -409,7 +409,7 @@ export default function TaskDetail({ user }) {
                     />
                     <div className="submission-actions">
                       <button type="submit" className="btn success" disabled={submitting}>
-                        <CheckCircle2 size={16} /> {submitting ? 'Отправляем…' : 'Сдать работу куратору'}
+                        <CheckCircle2 size={16} /> {submitting ? 'Отправляем…' : 'Сдать работу сотруднику'}
                       </button>
                       <button type="button" className="btn danger-ghost" onClick={handleWithdraw}>
                         Отозвать участие
@@ -426,7 +426,7 @@ export default function TaskDetail({ user }) {
                     <Clock size={22} className="part-icon" />
                     <div>
                       <h3>Отчёт сдан на проверку</h3>
-                      <p className="muted">Куратор проверяет выполненную работу. После подтверждения баллы поступят в зачётную книжку.</p>
+                      <p className="muted">Сотрудник проверяет выполненную работу. После подтверждения баллы поступят в зачётную книжку.</p>
                     </div>
                   </div>
                   {myApp.submission_notes && (
@@ -462,7 +462,7 @@ export default function TaskDetail({ user }) {
                   <div>
                     <h3>Статус: {myApp.status === 'REJECTED' ? 'Заявка отклонена' : 'Отмечена неявка'}</h3>
                     <p className="muted">
-                      К сожалению, в этот раз куратор выбрал других участников либо зафиксировал неявку.
+                      К сожалению, в этот раз сотрудник выбрал других участников либо зафиксировал неявку.
                     </p>
                   </div>
                 </div>
