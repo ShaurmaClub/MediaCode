@@ -210,7 +210,7 @@ export default function Dashboard({ user }) {
         </div>
 
         {/* Bottom Two-Column: Ledger history and Notifications */}
-        <div className="two-col">
+        <div className="two-col dashboard-bottom-panels">
           <div className="panel">
             <div className="section-head">
               <h2>История начислений</h2>

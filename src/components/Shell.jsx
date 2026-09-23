@@ -126,17 +126,15 @@ export default function Shell({ user, setUser, theme, setTheme, children }) {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <Link to="/dashboard" className="sidebar-brand-link" title="КАИТ20 · МедиаКод">
-            {collapsed ? (
-              <img src="/brand/mediacode.png" alt="МедиаКод" className="sidebar-brand-compact" />
-            ) : (
+          {!collapsed && (
+            <Link to="/dashboard" className="sidebar-brand-link" title="КАИТ20 · МедиаКод">
               <div className="sidebar-brand-dual">
                 <img src="/brand/kait20.png" alt="КАИТ20" className="sidebar-brand-kait" />
                 <div className="sidebar-brand-divider" />
                 <img src="/brand/mediacode.png" alt="МедиаКод" className="sidebar-brand-mediacode" />
               </div>
-            )}
-          </Link>
+            </Link>
+          )}
           <button
             className="collapse-btn desktop-only"
             onClick={() => setCollapsed(!collapsed)}
