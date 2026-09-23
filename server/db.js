@@ -226,6 +226,67 @@ db.exec(`
   WHERE slug = 'montage';
 `);
 
+// MIGRATIONS BLOCK
+const recTableInfo = db.prepare('PRAGMA table_info(recruitment_applications)').all();
+const maxContactCol = recTableInfo.find(c => c.name === 'max_contact');
+if (maxContactCol && maxContactCol.notnull === 1) {
+  db.exec(`
+    PRAGMA foreign_keys=off;
+    BEGIN TRANSACTION;
+    ALTER TABLE recruitment_applications RENAME TO _recruitment_applications_old;
+    CREATE TABLE recruitment_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT UNIQUE NOT NULL,
+      track_id INTEGER NOT NULL,
+      full_name TEXT NOT NULL,
+      department TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      max_contact TEXT,
+      portfolio_url TEXT,
+      submission_url TEXT,
+      submission_text TEXT,
+      comment TEXT,
+      status TEXT DEFAULT 'SUBMITTED' CHECK(status IN ('SUBMITTED','IN_REVIEW','APPROVED','REJECTED','WITHDRAWN')),
+      consent_version TEXT DEFAULT '1.0',
+      consent_accepted_at TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at TEXT,
+      reviewed_by INTEGER,
+      student_user_id INTEGER,
+      FOREIGN KEY(track_id) REFERENCES recruitment_tracks(id) ON DELETE CASCADE,
+      FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY(student_user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+    INSERT INTO recruitment_applications (id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id) SELECT id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id FROM _recruitment_applications_old;
+    DROP TABLE _recruitment_applications_old;
+    COMMIT;
+    PRAGMA foreign_keys=on;
+  `);
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS application_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    materials_url TEXT,
+    file_path TEXT,
+    comment TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER,
+    FOREIGN KEY(application_id) REFERENCES applications(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+`);
+
+try {
+  db.prepare('SELECT activation_token FROM users LIMIT 1').get();
+} catch(e) {
+  db.exec('ALTER TABLE users ADD COLUMN activation_token TEXT;');
+}
+// END MIGRATIONS BLOCK
+
 export function seed() {
   const usersCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   const pw = bcrypt.hashSync('Demo123!', 10);
