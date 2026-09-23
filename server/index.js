@@ -794,7 +794,29 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
     }
 
     const isPhoneMax = phone_is_max === 'true' || phone_is_max === true || phone_is_max === '1';
-    const finalMaxContact = isPhoneMax ? normalizedPhone : null;
+    let finalMaxContact = null;
+    if (isPhoneMax) {
+      finalMaxContact = normalizedPhone;
+    } else {
+      const normalizedMax = normalizeRussianPhone(max_contact);
+      if (!normalizedMax) {
+        cleanupFiles();
+        return res.status(400).json({ error: 'Укажите корректный номер телефона РФ для мессенджера Макс' });
+      }
+      finalMaxContact = normalizedMax;
+    }
+
+    // Checking for duplicates (1 application per track per phone, unless allowed)
+    const existingApp = db.prepare('SELECT id, admin_resubmission_allowed FROM recruitment_applications WHERE phone = ? AND track_id = ? ORDER BY created_at DESC LIMIT 1').get(normalizedPhone, track.id);
+    if (existingApp) {
+      if (!existingApp.admin_resubmission_allowed) {
+        cleanupFiles();
+        return res.status(409).json({ error: 'Заявка с этим номером телефона на данное направление уже отправлена.' });
+      } else {
+        // Mark the permission as used by unsetting it
+        db.prepare('UPDATE recruitment_applications SET admin_resubmission_allowed = 0 WHERE id = ?').run(existingApp.id);
+      }
+    }
 
     const consentAccepted = consent === 'true' || consent === true || consent === '1';
     if (!consentAccepted) {
@@ -1257,6 +1279,17 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', auth, role
 });
 
 // Recruitment tracks management (Staff/Admin)
+// Admin route to allow resubmission
+app.post('/api/recruitment/applications/:id/allow-resubmission', auth, role('ADMIN'), (req, res) => {
+  const id = req.params.id;
+  const existing = db.prepare('SELECT * FROM recruitment_applications WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'Заявка не найдена' });
+
+  db.prepare('UPDATE recruitment_applications SET admin_resubmission_allowed = 1 WHERE id = ?').run(id);
+  audit(req.user.id, 'ALLOW_RESUBMISSION', 'RECRUITMENT', id, { phone: existing.phone });
+  res.json({ ok: true, message: 'Повторная подача заявки разрешена' });
+});
+
 app.get('/api/recruitment/tracks', auth, role('STAFF', 'ADMIN'), (req, res) => {
   const tracks = db.prepare(`
     SELECT rt.*,

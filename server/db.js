@@ -254,11 +254,12 @@ if (maxContactCol && maxContactCol.notnull === 1) {
       reviewed_at TEXT,
       reviewed_by INTEGER,
       student_user_id INTEGER,
+      admin_resubmission_allowed INTEGER DEFAULT 0,
       FOREIGN KEY(track_id) REFERENCES recruitment_tracks(id) ON DELETE CASCADE,
       FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
       FOREIGN KEY(student_user_id) REFERENCES users(id) ON DELETE SET NULL
     );
-    INSERT INTO recruitment_applications (id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id) SELECT id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id FROM _recruitment_applications_old;
+      INSERT INTO recruitment_applications (id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id, admin_resubmission_allowed) SELECT id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id, 0 FROM _recruitment_applications_old;
     DROP TABLE _recruitment_applications_old;
     COMMIT;
     PRAGMA foreign_keys=on;
@@ -284,6 +285,12 @@ try {
   db.prepare('SELECT activation_token FROM users LIMIT 1').get();
 } catch(e) {
   db.exec('ALTER TABLE users ADD COLUMN activation_token TEXT;');
+}
+
+try {
+  db.prepare('SELECT admin_resubmission_allowed FROM recruitment_applications LIMIT 1').get();
+} catch(e) {
+  db.exec('ALTER TABLE recruitment_applications ADD COLUMN admin_resubmission_allowed INTEGER DEFAULT 0;');
 }
 // END MIGRATIONS BLOCK
 

@@ -107,7 +107,8 @@ export default function PublicRecruitment() {
   const [department, setDepartment] = useState(DEPARTMENTS[0] || '');
   const [groupName, setGroupName] = useState('');
   const [phone, setPhone] = useState('');
-  const [phoneIsMax, setPhoneIsMax] = useState(false);
+  const [phoneIsMax, setPhoneIsMax] = useState(true);
+  const [maxContactPhone, setMaxContactPhone] = useState('');
   const [portfolioUrl, setPortfolioUrl] = useState('');
   const [submissionUrl, setSubmissionUrl] = useState('');
   const [submissionText, setSubmissionText] = useState('');
@@ -279,6 +280,14 @@ export default function PublicRecruitment() {
       return;
     }
 
+    if (!phoneIsMax) {
+      const maxDigits = maxContactPhone.replace(/\D/g, '');
+      if (maxDigits.length < 10) {
+        setErrorMessage('Укажите корректный номер телефона РФ для мессенджера Макс.');
+        return;
+      }
+    }
+
     // 4. Consent validation
     if (!consent) {
       setErrorMessage('Для отправки заявки необходимо дать согласие на обработку персональных данных.');
@@ -345,6 +354,9 @@ export default function PublicRecruitment() {
     formData.append('group_name', groupName.trim());
     formData.append('phone', phone.trim());
     formData.append('phone_is_max', phoneIsMax ? 'true' : 'false');
+    if (!phoneIsMax) {
+      formData.append('max_contact', maxContactPhone.trim());
+    }
     formData.append('portfolio_url', portfolioUrl.trim());
     formData.append('submission_url', urlToSend);
     formData.append('submission_text', textToSend);
@@ -395,7 +407,8 @@ export default function PublicRecruitment() {
     setFullName('');
     setGroupName('');
     setPhone('');
-    setPhoneIsMax(false);
+    setPhoneIsMax(true);
+    setMaxContactPhone('');
     setPortfolioUrl('');
     setSubmissionUrl('');
     setSubmissionText('');
@@ -747,6 +760,22 @@ export default function PublicRecruitment() {
                         </div>
                       </div>
                     </div>
+
+                    {!phoneIsMax && (
+                      <div className="form-group" style={{ marginTop: '12px' }}>
+                        <label>Номер телефона, зарегистрированный в Макс <span className="required">*</span></label>
+                        <PatternFormat
+                          format="+7 (###) ###-##-##"
+                          allowEmptyFormatting
+                          mask="_"
+                          value={maxContactPhone}
+                          onValueChange={(values) => setMaxContactPhone(values.value)}
+                          className="input"
+                          required
+                        />
+                        <small className="muted" style={{ display: 'block', marginTop: '4px' }}>Укажите другой номер, если Макс зарегистрирован не на основном контактном номере.</small>
+                      </div>
+                    )}
 
                     {/* Portfolio URL: strictly Yandex Disk */}
                     <div className="form-group">

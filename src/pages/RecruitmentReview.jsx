@@ -617,6 +617,33 @@ export default function RecruitmentReview({ currentUser }) {
                   </button>
                 )}
 
+                {user?.role === 'ADMIN' && (
+                  <button
+                    type="button"
+                    className="btn outline"
+                    disabled={busyAction}
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/recruitment/applications/${appDetails.application.id}/allow-resubmission`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                          toast.success(data.message);
+                          fetchApplicationDetails(appDetails.application.id);
+                        } else {
+                          toast.error(data.error);
+                        }
+                      } catch (err) {
+                        toast.error('Ошибка сети');
+                      }
+                    }}
+                  >
+                    Разрешить повторную подачу
+                  </button>
+                )}
+
                 {appDetails.application.status !== 'APPROVED' ? (
                   <button
                     type="button"
