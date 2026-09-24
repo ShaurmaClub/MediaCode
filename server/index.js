@@ -595,21 +595,23 @@ app.post('/api/auth/max-mini-app', (req, res) => {
 });
 
 app.post('/api/user/link-max', auth, (req, res) => {
-  const { initData, maxUserId, maxUsername } = req.body || {};
-  let userIdToLink = maxUserId;
-  let usernameToLink = maxUsername;
-
-  if (initData) {
-    const validation = validateMaxInitData(initData);
-    if (validation.valid && validation.user) {
-      userIdToLink = validation.user.id;
-      usernameToLink = validation.user.username;
+    const { initData } = req.body || {};
+    
+    if (!initData) {
+      return res.status(400).json({ error: 'Отсутствуют данные авторизации Макс' });
     }
-  }
-
-  if (!userIdToLink && !usernameToLink) {
-    return res.status(400).json({ error: 'Укажите данные аккаунта Макс' });
-  }
+    
+    const validation = validateMaxInitData(initData);
+    if (!validation.valid || !validation.user) {
+      return res.status(400).json({ error: validation.error || 'Недействительные данные авторизации Макс' });
+    }
+    
+    const userIdToLink = validation.user.id;
+    const usernameToLink = validation.user.username;
+    
+    if (!userIdToLink && !usernameToLink) {
+      return res.status(400).json({ error: 'Укажите данные аккаунта Макс' });
+    }
 
   db.prepare(`
     UPDATE users
@@ -2564,6 +2566,42 @@ app.get('/api/audit', strictAuth, role('ADMIN'), (req, res) => {
 // ==========================================
 // STATIC ASSETS & SPA ROUTING
 // ==========================================
+
+
+app.get('/api/tasks/files/download', strictAuth, (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath || !filePath.startsWith('/uploads/recruitment/')) {
+    return res.status(400).json({ error: 'Неверный путь к файлу' });
+  }
+
+  // Find if this path belongs to an application version accessible by the user.
+  // Actually, we should check if the user is STAFF/ADMIN or if it's the student's own application.
+  let isAuthorized = false;
+  if (req.user.role === 'STAFF' || req.user.role === 'ADMIN') {
+    isAuthorized = true;
+  } else {
+    // Check if the user owns this file
+    const version = db.prepare('SELECT a.student_id FROM application_versions v JOIN recruitment_applications a ON v.application_id = a.id WHERE v.file_path = ?').get(filePath);
+    if (version && version.student_id === req.user.id) {
+      isAuthorized = true;
+    }
+  }
+
+  if (!isAuthorized) {
+    return res.status(403).json({ error: 'Доступ запрещен' });
+  }
+
+  const filename = filePath.replace('/uploads/recruitment/', '');
+  try {
+    const safePath = storageService.getSafeFilePath(filename);
+    if (!fs.existsSync(safePath)) {
+      return res.status(404).json({ error: 'Файл не найден' });
+    }
+    res.download(safePath);
+  } catch (err) {
+    return res.status(500).json({ error: 'Ошибка сервера при скачивании' });
+  }
+});
 
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));

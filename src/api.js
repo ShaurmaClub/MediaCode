@@ -1,12 +1,17 @@
 export async function api(url, options = {}) {
-  const res = await fetch('/api' + url, {
+  const isFormData = options.body instanceof FormData;
+  const headers = { ...(options.headers || {}) };
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const fetchOptions = {
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    },
-    ...options
-  });
+    ...options,
+    headers
+  };
+
+  const res = await fetch('/api' + url, fetchOptions);
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

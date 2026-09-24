@@ -34,8 +34,8 @@ export function validateMaxInitData(initData) {
       }
     }
 
-    // In local development or testing without token, allow mock validation
-    if (!MAX_BOT_TOKEN || process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
+    // In testing allow mock validation
+    if (process.env.NODE_ENV === 'test') {
       if (user && (user.id || user.username)) {
         return { valid: true, user, authDate, simulated: true };
       }
