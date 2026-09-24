@@ -1,18 +1,21 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import fs from 'fs';
+let c = fs.readFileSync('src/pages/Leaderboard.jsx', 'utf8');
 
-const dbPath = path.resolve('./data/media.db');
-const db = new Database(dbPath);
+const helpers = `
+const handleOpenProfile = (user) => {
+  // placeholder for future profile modal
+};
 
-const np = '+79990000000';
-let user = db.prepare('SELECT id FROM users WHERE phone = ?').get(np);
-if (!user) {
-  db.prepare(`
-    INSERT INTO users (login, password_hash, role, first_name, last_name, phone, status, must_change_password)
-    VALUES ('temp_test', '', 'STUDENT', 'Новый', 'Кандидат', ?, 'PENDING_ACTIVATION', 0)
-  `).run(np);
-  console.log('Inserted candidate: ' + np);
-} else {
-  db.prepare(`UPDATE users SET status = 'PENDING_ACTIVATION', password_hash = '' WHERE phone = ?`).run(np);
-  console.log('Updated candidate: ' + np);
-}
+const formatEventsWord = (count) => {
+  const n = count % 100;
+  const n1 = count % 10;
+  if (n > 10 && n < 20) return \`\${count} мероприятий\`;
+  if (n1 > 1 && n1 < 5) return \`\${count} мероприятия\`;
+  if (n1 === 1) return \`\${count} мероприятие\`;
+  return \`\${count} мероприятий\`;
+};
+`;
+
+c = c.replace(/export default function Leaderboard\(\{ user \}\) \{/, helpers + '\nexport default function Leaderboard({ user }) {');
+
+fs.writeFileSync('src/pages/Leaderboard.jsx', c);

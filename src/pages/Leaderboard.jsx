@@ -4,6 +4,20 @@ import { api } from '../api.js';
 import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 
+
+const handleOpenProfile = (user) => {
+  // placeholder for future profile modal
+};
+
+const formatEventsWord = (count) => {
+  const n = count % 100;
+  const n1 = count % 10;
+  if (n > 10 && n < 20) return `${count} мероприятий`;
+  if (n1 > 1 && n1 < 5) return `${count} мероприятия`;
+  if (n1 === 1) return `${count} мероприятие`;
+  return `${count} мероприятий`;
+};
+
 export default function Leaderboard({ user }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
