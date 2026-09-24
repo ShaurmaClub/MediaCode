@@ -157,8 +157,37 @@ export default function Login({ onLogin }) {
   if (activationMode) {
     return (
       <div className="login-page">
-        <div className="login-card-wrapper" style={{ margin: '0 auto', flex: 1, display: 'flex', justifyContent: 'center' }}>
-          <form className="login-card" style={{ width: '450px' }} onSubmit={handleActivate}>
+        
+      <div className="login-art">
+        <div className="login-brand">
+          <div className="login-brand-dual">
+            <img src="/brand/kait20-white.png" alt="КАИТ20" className="login-brand-kait" />
+            <div className="login-brand-divider" />
+            <img src="/brand/mediacode.png" alt="МедиаКод" className="login-brand-mediacode" />
+          </div>
+          <span className="college-tag">Студенческий медиацентр</span>
+        </div>
+
+        <div className="login-quote">
+          <h2>Пространство, где идеи превращаются в яркие медиаистории.</h2>
+          <p>
+            Единая рабочая среда для фотографов, видеографов, авторов, дизайнеров и СММ медиаволонтёров колледжа.
+            Участвуйте в съёмках, ведите учёт баллов и пополняйте своё портфолио.
+          </p>
+        </div>
+
+        <div className="login-art-pills">
+          <div className="art-pill"><Camera size={15} /> <span>Фото и видео</span></div>
+          <div className="art-pill"><Sparkles size={15} /> <span>Электронная зачётка</span></div>
+          <div className="art-pill"><Shield size={15} /> <span>Рейтинг медиаволонтёров</span></div>
+        </div>
+
+        <div className="art-orb art-orb-1" />
+        <div className="art-orb art-orb-2" />
+      </div>
+
+        <div className="login-card-wrapper">
+          <form className="login-card" onSubmit={handleActivate}>
             <div className="login-card-header">
               <div className="eyebrow">АКТИВАЦИЯ АККАУНТА</div>
               <h2>Регистрация медиаволонтёра</h2>
