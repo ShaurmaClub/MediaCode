@@ -699,6 +699,87 @@ describe('Media Center API Tests', () => {
     assert.equal(newDash.data.user.totalPoints, 10);
   });
 
+  test('FormData regression for Task Submission', async () => {
+    const loginStu = await fetch(baseUrl + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({login: 'student', password: 'Demo123!'}) });
+    const stuCookie = loginStu.headers.get('set-cookie');
+    
+    // Create a new task by staff
+    const loginStaff = await fetch(baseUrl + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({login: 'staff', password: 'Demo123!'}) });
+    const staffCookie = loginStaff.headers.get('set-cookie');
+    
+    const taskRes = await fetch(baseUrl + '/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cookie': staffCookie },
+      body: JSON.stringify({ title: 'Test Task', points: 10, required_volunteers: 5, event_date: '2026-10-10', status: 'OPEN' })
+    });
+    const taskData = await taskRes.json();
+    const taskId = taskData.id || taskData.task?.id || taskData.taskId;
+    if (!taskId) throw new Error('Could not create task: ' + JSON.stringify(taskData));
+
+    // Student applies
+    const applyRes = await fetch(baseUrl + '/api/tasks/' + taskId + '/apply', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': stuCookie }, body: JSON.stringify({}) });
+    const applyData = await applyRes.json();
+    console.log('APPLY DATA:', applyData);
+    
+    // Staff finds the application and selects
+    const listRes = await fetch(baseUrl + '/api/tasks/' + taskId, { headers: { 'Cookie': staffCookie } });
+    const listData = await listRes.json();
+    const taskObj = listData.task || listData;
+    if (!taskObj.applicants) throw new Error('No applicants field: ' + JSON.stringify(listData));
+    const found = taskObj.applicants.find(a => a.first_name === 'Иван');
+if (!found) throw new Error('App not found! Applications: ' + JSON.stringify(listData.task.applications));
+const appId = found.id;
+    
+    const selectRes = await fetch(baseUrl + '/api/applications/' + appId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Cookie': staffCookie },
+      body: JSON.stringify({ status: 'SELECTED' })
+    });
+    if (selectRes.status !== 200) throw new Error('Select failed: ' + await selectRes.text());
+
+    // Build FormData
+    const FormData = globalThis.FormData;
+    const { Blob } = globalThis;
+    const form = new FormData();
+    form.append('submission_method', 'file');
+    form.append('comment', 'My file submission');
+    form.append('file', new Blob(['test file content'], { type: 'text/plain' }), 'test.txt');
+
+    // Submit
+    const submitRes = await fetch(baseUrl + `/api/tasks/${taskId}/submit-completion`, {
+      method: 'POST',
+      headers: { 'Cookie': stuCookie },
+      body: form
+    });
+    if (submitRes.status !== 200) console.log(await submitRes.clone().json());
+    assert.equal(submitRes.status, 200, 'FormData submission should succeed');
+    const submitData = await submitRes.json();
+    console.log('SUBMIT DATA:', submitData);
+
+    // Try downloading
+    let filePath = null;
+    if (submitData.version && submitData.version.file_path) filePath = submitData.version.file_path;
+    else if (submitData.file_path) filePath = submitData.file_path;
+    else {
+      // Find manually
+      const db = (await import('../server/db.js')).default;
+      const v = db.prepare('SELECT file_path FROM application_versions WHERE application_id = ? ORDER BY id DESC LIMIT 1').get(appId);
+      filePath = v.file_path;
+    }
+    const staffDownloadRes = await fetch(baseUrl + '/api/tasks/files/download?path=' + encodeURIComponent(filePath), {
+      headers: { 'Cookie': staffCookie }
+    });
+    assert.equal(staffDownloadRes.status, 200, 'Staff should download');
+
+    // Unauthorized student download
+    const loginStu2 = await fetch(baseUrl + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({login: 'anna', password: 'Demo123!'}) });
+    const stu2Cookie = loginStu2.headers.get('set-cookie');
+    const stu2DownloadRes = await fetch(baseUrl + '/api/tasks/files/download?path=' + encodeURIComponent(filePath), {
+      headers: { 'Cookie': stu2Cookie }
+    });
+    assert.equal(stu2DownloadRes.status, 403, 'Other student should get 403');
+  });
+
   test('MAX Mini App & Password Reset Request', async () => {
     // 1. GET MAX Config
     const configRes = await fetch(baseUrl + '/api/max/config');
@@ -729,6 +810,26 @@ describe('Media Center API Tests', () => {
     const maxLoginData = await maxLoginRes.json();
     assert.equal(maxLoginData.user.login, 'student');
     assert.equal(maxLoginData.user.max_contact_verified, true);
-  });
+
+      // 4. MAX Identity Uniqueness
+      const loginStu = await fetch(baseUrl + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({login: 'student', password: 'Demo123!'}) });
+      const stuCookie = loginStu.headers.get('set-cookie');
+      const loginStaff = await fetch(baseUrl + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({login: 'staff', password: 'Demo123!'}) });
+      const staffCookie = loginStaff.headers.get('set-cookie');
+
+      const link1 = await fetch(baseUrl + '/api/user/link-max', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': stuCookie },
+        body: JSON.stringify({ initData: 'user=%7B%22id%22%3A123123%2C%22username%22%3A%22new_max%22%7D&hash=mockhash' })
+      });
+      assert.equal(link1.status, 200);
+
+      const link2 = await fetch(baseUrl + '/api/user/link-max', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': staffCookie },
+        body: JSON.stringify({ initData: 'user=%7B%22id%22%3A123123%2C%22username%22%3A%22new_max%22%7D&hash=mockhash' })
+      });
+      assert.equal(link2.status, 409);
+    });
 });
 

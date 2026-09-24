@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
     max_contact TEXT,
     skills TEXT,
     status TEXT DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','DISABLED')),
-    theme TEXT DEFAULT 'system' CHECK(theme IN ('light','dark','system')),
+    theme TEXT DEFAULT 'system' CHECK(theme IN ('light','dark','system','violet','red')),
     joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
     max_user_id INTEGER,
     max_username TEXT,
@@ -198,6 +198,34 @@ function ensureColumn(table, colName, colDef) {
 }
 
 ensureColumn('users', 'skills', 'TEXT');
+
+// Safe check constraint migration for themes
+function migrateThemeCheck() {
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+    if (tableInfo && tableInfo.sql.includes("CHECK(theme IN ('light','dark','system'))")) {
+      console.log('Migrating users table theme constraint...');
+      db.exec('PRAGMA foreign_keys=OFF;');
+      db.transaction(() => {
+        const newSql = tableInfo.sql
+          .replace('CREATE TABLE users', 'CREATE TABLE users_new')
+          .replace("CHECK(theme IN ('light','dark','system'))", "CHECK(theme IN ('light','dark','system','violet','red'))");
+        db.exec(newSql);
+        
+        // Find columns to insert correctly
+        const cols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name).join(', ');
+        db.exec(`INSERT INTO users_new (${cols}) SELECT ${cols} FROM users`);
+        db.exec('DROP TABLE users');
+        db.exec('ALTER TABLE users_new RENAME TO users');
+      })();
+      db.exec('PRAGMA foreign_keys=ON;');
+    }
+  } catch (err) {
+    console.error('Migration error for themes:', err.message);
+  }
+}
+migrateThemeCheck();
+
 ensureColumn('users', 'middle_name', 'TEXT');
 ensureColumn('users', 'department', 'TEXT');
 ensureColumn('users', 'phone', 'TEXT');

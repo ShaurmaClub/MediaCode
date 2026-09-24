@@ -10,7 +10,7 @@ describe('Privacy and Phone Logic Tests', () => {
     const fs = await import('fs');
     try { fs.rmSync('./data/test_privacy.db', { force: true }); } catch {}
     process.env.NODE_ENV = 'test';
-    process.env.DB_FILE = './data/test_privacy.db';
+    process.env.DB_PATH = './data/test_privacy.db';
     process.env.PORT = '4007';
     process.env.SESSION_SECRET = 'test-secret';
     
@@ -132,6 +132,7 @@ describe('Privacy and Phone Logic Tests', () => {
     const stuLogin = await apiCall('POST', '/auth/login', { login: 'student', password: 'Demo123!' });
     const stuApp = await apiCall('GET', `/recruitment/applications/${appId}`, null, stuLogin.cookie);
     assert.equal(stuApp.status, 403);
+  });
   
   test('16. User without consent can logout successfully and loses session', async () => {
     // Temporarily revert consent
@@ -153,7 +154,5 @@ describe('Privacy and Phone Logic Tests', () => {
     // Dashboard completely 401 now
     const dashAfter = await apiCall('GET', '/dashboard', null, studentCookie);
     assert.equal(dashAfter.status, 401);
-  });
-});
-
+    });
 });

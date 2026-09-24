@@ -11,7 +11,7 @@ describe('Comprehensive Auth & Logic Tests', () => {
     const fs = await import('fs');
     try { fs.rmSync('./data/test_auth.db', { force: true }); } catch {}
     process.env.NODE_ENV = 'test';
-    process.env.DB_FILE = './data/test_auth.db';
+    process.env.DB_PATH = './data/test_auth.db';
     process.env.PORT = '4005';
     process.env.SESSION_SECRET = 'test-secret';
     

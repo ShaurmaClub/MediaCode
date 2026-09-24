@@ -613,6 +613,13 @@ app.post('/api/user/link-max', auth, (req, res) => {
       return res.status(400).json({ error: 'Укажите данные аккаунта Макс' });
     }
 
+    if (userIdToLink) {
+      const existingLink = db.prepare('SELECT id FROM users WHERE max_user_id = ? AND id != ?').get(String(userIdToLink), req.user.id);
+      if (existingLink) {
+        return res.status(409).json({ error: 'Этот профиль Макс уже привязан к другому аккаунту' });
+      }
+    }
+
   db.prepare(`
     UPDATE users
     SET max_user_id = COALESCE(?, max_user_id),
@@ -1713,7 +1720,8 @@ app.post('/api/tasks/:id/apply', strictAuth, role('STUDENT'), (req, res) => {
     return res.status(400).json({ error: 'Приём заявок на это мероприятие закрыт (статус: ' + task.status + ')' });
   }
 
-  const roleName = req.body.role_name ? String(req.body.role_name).trim() : null;
+  const body = req.body || {};
+  const roleName = body.role_name ? String(body.role_name).trim() : null;
 
   const existingApp = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(taskId, req.user.id);
   if (existingApp) {
@@ -2581,8 +2589,8 @@ app.get('/api/tasks/files/download', strictAuth, (req, res) => {
     isAuthorized = true;
   } else {
     // Check if the user owns this file
-    const version = db.prepare('SELECT a.student_id FROM application_versions v JOIN recruitment_applications a ON v.application_id = a.id WHERE v.file_path = ?').get(filePath);
-    if (version && version.student_id === req.user.id) {
+    const version = db.prepare('SELECT a.user_id FROM application_versions v JOIN applications a ON v.application_id = a.id WHERE v.file_path = ?').get(filePath);
+    if (version && version.user_id === req.user.id) {
       isAuthorized = true;
     }
   }

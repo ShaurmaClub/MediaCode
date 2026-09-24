@@ -684,6 +684,9 @@ export default function TaskDetail({ user }) {
                               {v.materials_url && (
                                 <div><b>Ссылка:</b> <a href={v.materials_url} target="_blank" rel="noreferrer">{v.materials_url}</a></div>
                               )}
+                              {v.file_path && (
+                                <div><b>Файл:</b> <a href={`/api/tasks/files/download?path=${encodeURIComponent(v.file_path)}`} target="_blank" rel="noreferrer">Скачать файл</a></div>
+                              )}
                               {v.comment && (
                                 <div><b>Комментарий:</b> {v.comment}</div>
                               )}
