@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { api } from './api.js';
 import { ToastProvider } from './context/ToastContext.jsx';
+import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import Shell from './components/Shell.jsx';
 import Login from './pages/Login.jsx';
 import FirstLogin from './pages/FirstLogin.jsx';
@@ -187,8 +188,9 @@ const rootElement = document.getElementById('root');
 createRoot(rootElement).render(
   <BrowserRouter>
     <ToastProvider>
-      <App />
+      <ErrorBoundary><App /></ErrorBoundary>
     </ToastProvider>
   </BrowserRouter>
 );
+
 
