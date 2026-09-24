@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Palette, CheckCircle2, User, Lock, Save, Sparkles, MessageCircle } from 'lucide-react';
+import { Palette, CheckCircle2, User, Lock, Save, Sparkles, MessageCircle, Eye, EyeOff } from 'lucide-react';
 import { api, THEMES } from '../api.js';
 import { Page } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -377,3 +377,4 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
     </Page>
   );
 }
+

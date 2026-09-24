@@ -470,10 +470,12 @@ export default function Students({ user }) {
 
                   {(user.role === 'ADMIN' || user.role === 'STAFF') && studentDetails.user.privacy_consent_at && (
                     <div className="profile-modal-section" style={{ background: 'var(--surface2)', padding: '16px', borderRadius: 'var(--radius-md)', marginBottom: '16px' }}>
-                      <h4 style={{ marginBottom: '8px' }}>Согласие для личного кабинета</h4>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)' }}>
-                        <CheckCircle size={16} />
-                        <span style={{ fontSize: '14px', fontWeight: 500 }}>Подтверждено {formatDateTime(studentDetails.user.privacy_consent_at)}</span>
+                      <h4 style={{ margin: "0 0 12px 0", fontSize: "14px" }}>Согласие для личного кабинета</h4>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "13px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--success)", fontWeight: 500 }}>
+                          <CheckCircle size={16} /> Подтверждено
+                        </div>
+                        <div><span className="muted">Дата и время:</span> {formatDateTime(studentDetails.user.privacy_consent_at)}</div>
                       </div>
                     </div>
                   )}
@@ -645,3 +647,4 @@ export default function Students({ user }) {
     </Page>
   );
 }
+

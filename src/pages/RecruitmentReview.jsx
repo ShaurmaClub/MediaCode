@@ -586,11 +586,19 @@ export default function RecruitmentReview({ currentUser }) {
               </div>
 
               {/* Consent & Audit info */}
-              <div className="app-audit-meta">
-                <small className="muted">
-                  Подано: {formatDateTime(appDetails.application.created_at)} · Согласие ПДн v{appDetails.application.consent_version} подтверждено
+              <div className="app-audit-meta" style={{ marginTop: "24px", padding: "16px", background: "var(--surface)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
+                <h4 style={{ margin: "0 0 12px 0", fontSize: "14px" }}>Согласие на обработку персональных данных</h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "13px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--success)", fontWeight: 500 }}>
+                    <CheckCircle size={16} /> Подтверждено при подаче заявки
+                  </div>
+                  <div><span className="muted">Дата и время:</span> {formatDateTime(appDetails.application.consent_accepted_at || appDetails.application.created_at)}</div>
+                  <div><span className="muted">Версия документа:</span> {appDetails.application.consent_version || "Не указана"}</div>
+                </div>
+                <div style={{ marginTop: "16px", paddingTop: "12px", borderTop: "1px solid var(--border)", fontSize: "12px" }} className="muted">
+                  Подано: {formatDateTime(appDetails.application.created_at)}
                   {appDetails.application.reviewer_name && ` · Проверил: ${appDetails.application.reviewer_name}`}
-                </small>
+                </div>
               </div>
 
               {/* Reviewer Action Buttons */}
@@ -734,3 +742,4 @@ export default function RecruitmentReview({ currentUser }) {
     </Page>
   );
 }
+
