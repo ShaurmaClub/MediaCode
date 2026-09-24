@@ -763,17 +763,16 @@ export default function PublicRecruitment() {
 
                     {!phoneIsMax && (
                       <div className="form-group" style={{ marginTop: '12px' }}>
-                        <label>Номер телефона, зарегистрированный в Макс <span className="required">*</span></label>
-                        <PatternFormat
-                          format="+7 (###) ###-##-##"
-                          allowEmptyFormatting
-                          mask="_"
+                        <label>Номер телефона, используемый в Макс <span className="required">*</span></label>
+                        <input
+                          type="tel"
                           value={maxContactPhone}
-                          onValueChange={(values) => setMaxContactPhone(values.value)}
+                          onChange={(e) => setMaxContactPhone(formatRussianPhoneInput(e.target.value))}
+                          placeholder="+7 (900) 000-00-00"
                           className="input"
                           required
                         />
-                        <small className="muted" style={{ display: 'block', marginTop: '4px' }}>Укажите другой номер, если Макс зарегистрирован не на основном контактном номере.</small>
+                        <small className="muted" style={{ display: 'block', marginTop: '4px' }}>Укажите другой номер телефона, на который зарегистрирован ваш аккаунт Макс.</small>
                       </div>
                     )}
 
@@ -1014,3 +1013,5 @@ export default function PublicRecruitment() {
           </div>
   );
 }
+
+
