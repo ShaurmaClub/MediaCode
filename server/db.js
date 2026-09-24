@@ -575,3 +575,56 @@ export function seed() {
 }
 
 export default db;
+
+
+// ==========================================
+// MIGRATION: Normalize all phones
+// ==========================================
+function _normalizeMigrationPhone(rawPhone) {
+  if (!rawPhone) return null;
+  const digits = String(rawPhone).replace(/\D/g, '');
+  if (digits.length === 11 && (digits.startsWith('7') || digits.startsWith('8'))) {
+    return '+7' + digits.slice(1);
+  } else if (digits.length === 10) {
+    return '+7' + digits;
+  }
+  return null;
+}
+
+try {
+  const allUsers = db.prepare('SELECT id, phone FROM users WHERE phone IS NOT NULL').all();
+  const updateUserPhone = db.prepare('UPDATE users SET phone = ? WHERE id = ?');
+  allUsers.forEach(u => {
+    const norm = _normalizeMigrationPhone(u.phone);
+    if (norm && norm !== u.phone) {
+      updateUserPhone.run(norm, u.id);
+    }
+  });
+
+  const allApps = db.prepare('SELECT id, phone FROM recruitment_applications WHERE phone IS NOT NULL').all();
+  const updateAppPhone = db.prepare('UPDATE recruitment_applications SET phone = ? WHERE id = ?');
+  allApps.forEach(a => {
+    const norm = _normalizeMigrationPhone(a.phone);
+    if (norm && norm !== a.phone) {
+      updateAppPhone.run(norm, a.id);
+    }
+  });
+} catch (err) {
+  console.error('Failed to run phone normalization migration:', err);
+}
+
+// ==========================================
+// MIGRATION: Ensure mock users have phones
+// ==========================================
+try {
+  const updatePhone = db.prepare(`UPDATE users SET phone = ? WHERE login = ? AND (phone IS NULL OR phone = '')`);
+  updatePhone.run('+79001002030', 'admin');
+  updatePhone.run('+79002003040', 'staff');
+  updatePhone.run('+79161234567', 'student');
+  updatePhone.run('+79162345678', 'anna');
+  updatePhone.run('+79163456789', 'dmitry');
+  updatePhone.run('+79164567890', 'sofia');
+} catch (err) {
+  console.error('Failed to set mock user phones:', err);
+}
+
