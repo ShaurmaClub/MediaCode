@@ -310,21 +310,21 @@ export default function Login({ onLogin }) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="login-input">{loginMode === 'phone' ? 'Номер телефона' : 'Логин'}</label>
+              <label htmlFor="login-input">{(loginMode === 'phone' || loginMode === 'activation') ? 'Номер телефона' : 'Логин'}</label>
               <input
                 id="login-input"
-                type={loginMode === 'phone' ? "tel" : "text"}
+                type={(loginMode === 'phone' || loginMode === 'activation') ? 'tel' : 'text'}
                 required
                 autoFocus
                 value={form.login}
                 onChange={(e) => {
                   let val = e.target.value;
-                  if (loginMode === 'phone') {
+                  if (loginMode === 'phone' || loginMode === 'activation') {
                     val = formatPhone(val);
                   }
                   setForm({ ...form, login: val });
                 }}
-                placeholder={loginMode === 'phone' ? "+7 (900) 000-00-00" : "Например: ivan_petrov"}
+                placeholder={(loginMode === 'phone' || loginMode === 'activation') ? '+7 (900) 000-00-00' : 'Например: ivan_petrov'}
               />
               {loginMode === 'login' && /^\+?[0-9\s\-\(\)]{10,}$/.test(form.login) && (
                 <small className="text-warning" style={{ marginTop: '4px', display: 'block' }}>Похоже на номер телефона. Используйте вкладку «По номеру телефона».</small>
