@@ -48,8 +48,33 @@ export default function Login({ onLogin }) {
         setError('Введите корректный номер телефона.');
         return;
       }
-      setActivationPhone(form.login);
-      setActivationMode(true);
+      setBusy(true);
+      setError('');
+      try {
+        const res = await fetch('/api/auth/first-login-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: form.login })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.notFound) {
+            setError('Номер не найден. Хотите подать заявку в медиацентр?');
+          } else {
+            setError(data.error || 'Ошибка проверки номера');
+          }
+          return;
+        }
+        setActivationPhone(form.login);
+        if (data.user) {
+          setActForm({ ...actForm, first_name: data.user.first_name || '', last_name: data.user.last_name || '', group_name: data.user.group_name || '' });
+        }
+        setActivationMode(true);
+      } catch (err) {
+        setError('Сбой сети. Попробуйте еще раз.');
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     if (loginMode === 'phone' && form.login.replace(/\D/g, '').length < 11) {
@@ -140,12 +165,18 @@ export default function Login({ onLogin }) {
               <p className="muted">Ваш номер <b>{activationPhone}</b> найден. Пожалуйста, заполните профиль для завершения регистрации.</p>
             </div>
 
-            {error && <div className="error-banner">{error}</div>}
-
-            <div className="form-group">
-              <label>Код активации (6 символов) <span className="required">*</span></label>
-              <input type="text" required value={actForm.token} onChange={e => setActForm({...actForm, token: e.target.value.toUpperCase()})} placeholder="Например: A1B2C3" maxLength={6} />
+            {error && (
+            <div className="error-banner">
+              {error}
+              {error.includes('подать заявку') && (
+                <div style={{ marginTop: '8px' }}>
+                  <Link to="/join" className="btn primary tiny">Заполнить анкету</Link>
+                </div>
+              )}
             </div>
+          )}
+
+            
 
             <div style={{ display: 'flex', gap: '12px' }}>
               <div className="form-group" style={{ flex: 1 }}>
@@ -255,7 +286,16 @@ export default function Login({ onLogin }) {
             <p className="muted">Войдите, чтобы получить доступ к мероприятиям и личному кабинету.</p>
           </div>
 
-          {error && <div className="error-banner">{error}</div>}
+          {error && (
+            <div className="error-banner">
+              {error}
+              {error.includes('подать заявку') && (
+                <div style={{ marginTop: '8px' }}>
+                  <Link to="/join" className="btn primary tiny">Заполнить анкету</Link>
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px", background: "var(--surface2)", padding: "4px", borderRadius: "var(--radius-md)" }}>
               <button type="button" onClick={() => { setLoginMode("phone"); setForm({...form, login: "", password: ""}); }} className={`btn auth-tab-btn ${loginMode === "phone" ? "active" : ""}`} >
@@ -291,7 +331,8 @@ export default function Login({ onLogin }) {
               )}
             </div>
 
-          <div className="form-group">
+          {loginMode !== 'activation' && (
+            <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label htmlFor="password-input">Пароль</label>
               <button
@@ -306,6 +347,7 @@ export default function Login({ onLogin }) {
                 Забыли пароль?
               </button>
             </div>
+
             <input
               id="password-input"
               type="password"
@@ -315,9 +357,10 @@ export default function Login({ onLogin }) {
               placeholder="Введите пароль"
             />
           </div>
+          )}
 
           <button type="submit" className="btn primary wide" disabled={busy}>
-            {busy ? 'Входим в систему…' : 'Войти в МедиаКод'}
+            {busy ? (loginMode === 'activation' ? 'Проверка...' : 'Входим в систему…') : (loginMode === 'activation' ? 'Продолжить' : 'Войти в МедиаКод')}
             {!busy && <ArrowRight size={16} />}
           </button>
 

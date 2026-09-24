@@ -1,6 +1,3 @@
 import fs from 'fs';
-let c = fs.readFileSync('tests/e2e/smoke.spec.js', 'utf8');
-
-c = c.replace(/await page\.fill\('#login-input'/g, "await page.click('button:has-text(\"По логину\")');\n    await page.fill('#login-input'");
-
-fs.writeFileSync('tests/e2e/smoke.spec.js', c);
+let lines = fs.readFileSync('src/pages/Login.jsx', 'utf8').split('\n');
+for(let i=345; i<360; i++) { if (lines[i]) console.log(i+1, lines[i]); }

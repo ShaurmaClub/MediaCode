@@ -2353,57 +2353,30 @@ app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
   res.json({ added, errors });
 });
 
-app.post('/api/auth/activation-check', authLimiter, (req, res) => {
-  const { phone, token } = req.body;
+app.post('/api/auth/first-login-check', authLimiter, (req, res) => {
+  const { phone } = req.body;
   const np = normalizeRussianPhone(phone);
   if (!np) return res.status(400).json({error: 'Неверные данные'});
-  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
-  if (!user) return res.status(400).json({error: 'Неверный код активации или номер'});
   
-  if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
-    return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
+  const user = db.prepare("SELECT * FROM users WHERE phone = ?").get(np);
+  if (!user) {
+    return res.status(404).json({error: 'Номер не найден', notFound: true});
+  }
+  if (user.status !== 'PENDING_ACTIVATION') {
+    return res.status(400).json({error: 'Аккаунт уже активирован или заблокирован. Используйте обычный вход по паролю.'});
   }
   
-  const tokenHash = crypto.createHash('sha256').update(String(token).trim()).digest('hex');
-  if (user.activation_token !== tokenHash || (user.activation_expires_at && new Date(user.activation_expires_at) < new Date())) {
-    const attempts = (user.activation_attempts || 0) + 1;
-    if (attempts >= 5) {
-      const lockUntil = new Date(Date.now() + 15 * 60000).toISOString();
-      db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(lockUntil, user.id);
-      return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
-    } else {
-      db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
-      return res.status(400).json({error: 'Неверный код активации'});
-    }
-  }
-  res.json({ ok: true });
+  res.json({ ok: true, user: { first_name: user.first_name, last_name: user.last_name, group_name: user.group_name } });
 });
 
 app.post('/api/auth/activate', authLimiter, (req, res) => {
-  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password, consent_version, privacy_consent } = req.body;
+  const { phone, first_name, last_name, middle_name, department, group_name, login, password, consent_version, privacy_consent } = req.body;
   const np = normalizeRussianPhone(phone);
   if (!privacy_consent) return res.status(400).json({error: 'Требуется согласие на обработку персональных данных'});
   
   const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
-  if (!user) return res.status(400).json({error: 'Неверный код активации или пользователь не найден'});
+  if (!user) return res.status(400).json({error: 'Пользователь не найден или уже активирован'});
   
-  if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
-    return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
-  }
-  
-  const tokenHash = crypto.createHash('sha256').update(String(token).trim()).digest('hex');
-  if (user.activation_token !== tokenHash || (user.activation_expires_at && new Date(user.activation_expires_at) < new Date())) {
-    const attempts = (user.activation_attempts || 0) + 1;
-    if (attempts >= 5) {
-      const lockUntil = new Date(Date.now() + 15 * 60000).toISOString();
-      db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(lockUntil, user.id);
-      return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
-    } else {
-      db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
-      return res.status(400).json({error: 'Неверный код активации'});
-    }
-  }
-
   if (!first_name || !last_name || !department || !group_name || !login || !password || !consent_version) {
     return res.status(400).json({error: 'Заполните все обязательные поля'});
   }
