@@ -47,6 +47,10 @@ export default function Login({ onLogin }) {
       setError('Введите корректный номер телефона.');
       return;
     }
+    if (loginMode === 'login' && /^\d+$/.test(form.login.trim())) {
+      setError('Логин не может состоять только из цифр. Если это телефон, переключите вкладку.');
+      return;
+    }
     if (!form.login || !form.password) {
       setError('Заполните логин/телефон и пароль');
       return;
@@ -186,7 +190,7 @@ export default function Login({ onLogin }) {
                   style={{ marginTop: '2px' }}
                 />
                 <span style={{ fontSize: '12px', lineHeight: 1.4 }}>
-                  Я даю <a href="/privacy.pdf" target="_blank" className="text-link" onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы кабинета.
+                  Я даю <a href="/privacy-policy" target="_blank" className="text-link" onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы кабинета.
                 </span>
               </label>
             </div>
@@ -243,18 +247,10 @@ export default function Login({ onLogin }) {
           {error && <div className="error-banner">{error}</div>}
 
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: 'var(--surface2)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
-              <button 
-                type="button" 
-                onClick={() => { setLoginMode('phone'); setForm({...form, login: ''}); }} 
-                className={`btn ${loginMode === 'phone' ? 'primary' : ''}`} 
-                style={{ flex: 1, borderRadius: 'var(--radius-sm)', background: loginMode === 'phone' ? 'var(--accent)' : 'transparent', color: loginMode === 'phone' ? '#ffffff' : 'var(--text)', border: 'none', boxShadow: loginMode === 'phone' ? '0 2px 8px rgba(109,74,255,0.3)' : 'none' }}>
+              <button type="button" onClick={() => { setLoginMode('phone'); setForm({...form, login: ''}); }} className={`btn auth-tab-btn ${loginMode === 'phone' ? 'active' : ''}`} >
                 По номеру телефона
               </button>
-              <button 
-                type="button" 
-                onClick={() => { setLoginMode('login'); setForm({...form, login: ''}); }} 
-                className={`btn ${loginMode === 'login' ? 'primary' : ''}`} 
-                style={{ flex: 1, borderRadius: 'var(--radius-sm)', background: loginMode === 'login' ? 'var(--accent)' : 'transparent', color: loginMode === 'login' ? '#ffffff' : 'var(--text)', border: 'none', boxShadow: loginMode === 'login' ? '0 2px 8px rgba(109,74,255,0.3)' : 'none' }}>
+              <button type="button" onClick={() => { setLoginMode('login'); setForm({...form, login: ''}); }} className={`btn auth-tab-btn ${loginMode === 'login' ? 'active' : ''}`} >
                 По логину
               </button>
             </div>
@@ -323,18 +319,15 @@ export default function Login({ onLogin }) {
       {/* Password Reset Modal */}
       {showResetModal && (
         <Modal
-          title="Восстановление доступа"
+          title="Не получается войти?"
           onClose={() => setShowResetModal(false)}
         >
-          <div style={{ textAlign: 'center', padding: '8px 0' }}>
-            <p style={{ fontSize: '15px', lineHeight: 1.6, marginBottom: '16px' }}>
-              Для восстановления доступа к аккаунту обратитесь к руководителю медиацентра (сотруднику) в Telegram или ВКонтакте.
-            </p>
-            <p className="muted" style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '24px' }}>
-              Сотрудник проверит вашу личность, сгенерирует новый временный пароль и отправит его вам лично. Это необходимо в целях безопасности платформы.
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <p style={{ fontSize: "15px", lineHeight: 1.6, marginBottom: "24px" }}>
+              Если вы забыли пароль или потеряли доступ к платформе, напишите об этом в чат команды медиацентра. Сотрудник поможет восстановить доступ.
             </p>
             <button type="button" className="btn primary wide" onClick={() => setShowResetModal(false)}>
-              Понятно, закрыть
+              Понятно
             </button>
           </div>
         </Modal>
@@ -342,3 +335,6 @@ export default function Login({ onLogin }) {
     </div>
   );
 }
+
+
+
