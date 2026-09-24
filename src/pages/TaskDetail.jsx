@@ -22,6 +22,21 @@ import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { isValidYandexDiskLink } from './PublicRecruitment.jsx';
 
+const SKILL_MAP = {
+  'Photography': 'Фотография',
+  'Interviewing': 'Интервью',
+  'Video': 'Видеосъёмка',
+  'Editing': 'Монтаж',
+  'Design': 'Дизайн',
+  'SMM': 'СММ',
+  'Content': 'Контент',
+  'Smm': 'СММ',
+  'smm': 'СММ'
+};
+function tSkill(s) {
+  return SKILL_MAP[s] || s;
+}
+
 export default function TaskDetail({ user }) {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -412,8 +427,8 @@ export default function TaskDetail({ user }) {
                       rows="3"
                       required
                       placeholder="Например: Ссылка на Яндекс.Диск с фоторепортажем (250 кадров) и отобранные лучшие фото…"
-                      value={submissionNotes}
-                      onChange={(e) => setSubmissionNotes(e.target.value)}
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
                     />
                     <div className="submission-actions">
                       <button type="submit" className="btn success" disabled={submitting}>
@@ -720,4 +735,7 @@ export default function TaskDetail({ user }) {
     </Page>
   );
 }
+
+
+
 
