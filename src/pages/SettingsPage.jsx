@@ -66,9 +66,13 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
     e.preventDefault();
     setSavingProfile(true);
     try {
+      const payload = { ...profileForm };
+      if (user.role === 'STUDENT') {
+        delete payload.phone;
+      }
       const res = await api('/auth/profile', {
         method: 'PATCH',
-        body: JSON.stringify(profileForm)
+        body: JSON.stringify(payload)
       });
       setUser(res.user);
       toast.success('Данные вашего профиля успешно обновлены!');
@@ -377,4 +381,5 @@ export default function SettingsPage({ theme, setTheme, user, setUser }) {
     </Page>
   );
 }
+
 

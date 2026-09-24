@@ -213,6 +213,7 @@ ensureColumn('users', 'phone_verified', 'INTEGER DEFAULT 0');
   ensureColumn('recruitment_applications', 'privacy_consent_source', 'TEXT DEFAULT NULL');
   ensureColumn('users', 'activation_attempts', 'INTEGER DEFAULT 0');
   ensureColumn('users', 'activation_locked_until', 'TEXT DEFAULT NULL');
+  ensureColumn('users', 'activation_expires_at', 'TEXT DEFAULT NULL');
 ensureColumn('tasks', 'updated_at', 'TEXT');
 ensureColumn('tasks', 'end_time', 'TEXT');
 ensureColumn('tasks', 'equipment', 'TEXT');
@@ -270,7 +271,7 @@ if (maxContactCol && maxContactCol.notnull === 1) {
       FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
       FOREIGN KEY(student_user_id) REFERENCES users(id) ON DELETE SET NULL
     );
-      INSERT INTO recruitment_applications (id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id, admin_resubmission_allowed) SELECT id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, created_at, reviewed_at, reviewed_by, student_user_id, 0 FROM _recruitment_applications_old;
+      INSERT INTO recruitment_applications (id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, privacy_consent_source, created_at, reviewed_at, reviewed_by, student_user_id, admin_resubmission_allowed) SELECT id, public_id, track_id, full_name, department, group_name, phone, max_contact, portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, privacy_consent_source, created_at, reviewed_at, reviewed_by, student_user_id, 0 FROM _recruitment_applications_old;
     DROP TABLE _recruitment_applications_old;
     COMMIT;
     PRAGMA foreign_keys=on;
@@ -627,4 +628,7 @@ try {
 } catch (err) {
   console.error('Failed to set mock user phones:', err);
 }
+
+
+
 

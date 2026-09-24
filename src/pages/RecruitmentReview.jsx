@@ -592,7 +592,7 @@ export default function RecruitmentReview({ currentUser }) {
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--success)", fontWeight: 500 }}>
                     <CheckCircle size={16} /> Подтверждено при подаче заявки
                   </div>
-                  <div><span className="muted">Дата и время:</span> {formatDateTime(appDetails.application.consent_accepted_at || appDetails.application.created_at)}</div>
+                  <div><span className="muted">Дата и время:</span> {formatDateTime(appDetails.application.consent_accepted_at)}</div>
                   <div><span className="muted">Версия документа:</span> {appDetails.application.consent_version || "Не указана"}</div>
                 </div>
                 <div style={{ marginTop: "16px", paddingTop: "12px", borderTop: "1px solid var(--border)", fontSize: "12px" }} className="muted">
@@ -742,4 +742,5 @@ export default function RecruitmentReview({ currentUser }) {
     </Page>
   );
 }
+
 

@@ -11,7 +11,7 @@ export default function PrivacyPolicy() {
         <button 
           type="button" 
           className="btn ghost"
-          onClick={() => window.history.back()}
+                    onClick={() => { if (window.history.length > 1) { window.history.back(); } else { window.close(); window.location.href = "/"; } }}
         >
           Вернуться назад
         </button>
@@ -19,3 +19,4 @@ export default function PrivacyPolicy() {
     </div>
   );
 }
+

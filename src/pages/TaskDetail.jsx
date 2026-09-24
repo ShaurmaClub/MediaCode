@@ -125,22 +125,35 @@ export default function TaskDetail({ user }) {
     }
   };
 
-  // Student submits completion proof
   const handleSubmitCompletion = async (e) => {
     e.preventDefault();
+    let body;
+
     if (submissionMethod === 'link') {
       if (!materialsUrl.trim()) return toast.error('Укажите ссылку на материалы');
       if (!isValidYandexDiskLink(materialsUrl.trim())) return toast.error('Укажите корректную ссылку на Яндекс Диск');
+      body = JSON.stringify({ comment, materials_url: materialsUrl.trim(), submission_method: 'link' });
+    } else {
+      const fileInput = document.getElementById('taskFile');
+      if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        return toast.error('Пожалуйста, выберите файл для загрузки');
+      }
+      body = new FormData();
+      body.append('file', fileInput.files[0]);
+      body.append('comment', comment);
+      body.append('submission_method', 'file');
     }
+
     setSubmitting(true);
     try {
       await api(`/tasks/${id}/submit-completion`, {
         method: 'POST',
-        body: JSON.stringify({ comment, materials_url: submissionMethod === 'link' ? materialsUrl.trim() : '', submission_method: submissionMethod })
+        body
       });
       toast.success('Отчёт о выполнении передан на проверку!');
       setMaterialsUrl('');
       setComment('');
+      if (document.getElementById('taskFile')) document.getElementById('taskFile').value = '';
       loadTask();
     } catch (err) {
       toast.error(err.message);
@@ -418,18 +431,44 @@ export default function TaskDetail({ user }) {
                     </div>
                   </div>
 
-                  <form onSubmit={handleSubmitCompletion} className="submission-form">
-                    <label>
-                      <b>Сдать работу на проверку:</b>
-                      <span className="muted">Прикрепите ссылку на диск с материалами или опишите результат</span>
-                    </label>
-                    <textarea
-                      rows="3"
-                      required
-                      placeholder="Например: Ссылка на Яндекс.Диск с фоторепортажем (250 кадров) и отобранные лучшие фото…"
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                    />
+                  <form onSubmit={handleSubmitCompletion} className="submission-form" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div>
+                      <b style={{ display: "block", marginBottom: "8px" }}>Материалы выполненной работы:</b>
+                      <div className="tabs" style={{ marginBottom: "12px" }}>
+                        <button type="button" className={`tab ${submissionMethod === "link" ? "active" : ""}`} onClick={() => setSubmissionMethod("link")}>
+                          Ссылка на Яндекс Диск
+                        </button>
+                        <button type="button" className={`tab ${submissionMethod === "file" ? "active" : ""}`} onClick={() => setSubmissionMethod("file")}>
+                          Загрузить файл
+                        </button>
+                      </div>
+                      
+                      {submissionMethod === "link" ? (
+                        <input
+                          type="url"
+                          placeholder="https://disk.yandex.ru/..."
+                          value={materialsUrl}
+                          onChange={(e) => setMaterialsUrl(e.target.value)}
+                          required
+                        />
+                      ) : (
+                        <div className="file-upload-block">
+                          <input type="file" id="taskFile" accept="image/jpeg,image/png,video/mp4,application/pdf" />
+                          <small className="muted" style={{ display: "block", marginTop: "4px" }}>Максимум 50 МБ (JPG, PNG, MP4, PDF)</small>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <b style={{ display: "block", marginBottom: "8px" }}>Комментарий к выполненной работе (необязательно):</b>
+                      <textarea
+                        rows="3"
+                        placeholder="Опишите результат или оставьте комментарий..."
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                      />
+                    </div>
+
                     <div className="submission-actions">
                       <button type="submit" className="btn success" disabled={submitting}>
                         <CheckCircle2 size={16} /> {submitting ? 'Отправляем…' : 'Сдать работу сотруднику'}
@@ -463,6 +502,9 @@ export default function TaskDetail({ user }) {
                           {v.materials_url && (
                             <div><b>Ссылка:</b> <a href={v.materials_url} target="_blank" rel="noreferrer">{v.materials_url}</a></div>
                           )}
+                          {v.file_path && (
+                            <div><b>Файл:</b> <a href={api.defaults.baseURL + v.file_path} target="_blank" rel="noreferrer">Скачать файл</a></div>
+                          )}
                           {v.comment && (
                             <div><b>Комментарий:</b> {v.comment}</div>
                           )}
@@ -472,6 +514,64 @@ export default function TaskDetail({ user }) {
                   ) : myApp.submission_notes && (
                     <div className="my-comment-box">
                       <span className="muted">Ваш отчёт:</span> «{myApp.submission_notes}»
+                    </div>
+                  )}
+
+                  {!window._editingReport ? (
+                    <div style={{ marginTop: "16px" }}>
+                      <button className="btn outline" onClick={() => { window._editingReport = true; loadTask(); }}>
+                        <Edit size={16} /> Прислать новую версию отчёта
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: "16px", padding: "16px", border: "1px dashed var(--border)", borderRadius: "8px" }}>
+                      <form onSubmit={(e) => { window._editingReport = false; handleSubmitCompletion(e); }} className="submission-form" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <div>
+                          <b style={{ display: "block", marginBottom: "8px" }}>Новые материалы работы:</b>
+                          <div className="tabs" style={{ marginBottom: "12px" }}>
+                            <button type="button" className={`tab ${submissionMethod === "link" ? "active" : ""}`} onClick={() => setSubmissionMethod("link")}>
+                              Ссылка на Яндекс Диск
+                            </button>
+                            <button type="button" className={`tab ${submissionMethod === "file" ? "active" : ""}`} onClick={() => setSubmissionMethod("file")}>
+                              Загрузить файл
+                            </button>
+                          </div>
+                          
+                          {submissionMethod === "link" ? (
+                            <input
+                              type="url"
+                              placeholder="https://disk.yandex.ru/..."
+                              value={materialsUrl}
+                              onChange={(e) => setMaterialsUrl(e.target.value)}
+                              required
+                            />
+                          ) : (
+                            <div className="file-upload-block">
+                              <input type="file" id="taskFile" accept="image/jpeg,image/png,video/mp4,application/pdf" />
+                              <small className="muted" style={{ display: "block", marginTop: "4px" }}>Максимум 50 МБ (JPG, PNG, MP4, PDF)</small>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div>
+                          <b style={{ display: "block", marginBottom: "8px" }}>Новый комментарий (необязательно):</b>
+                          <textarea
+                            rows="3"
+                            placeholder="Опишите результат или оставьте комментарий..."
+                            value={comment}
+                            onChange={(e) => setComment(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="submission-actions">
+                          <button type="submit" className="btn success" disabled={submitting}>
+                            <CheckCircle2 size={16} /> {submitting ? "Отправляем…" : "Отправить новую версию"}
+                          </button>
+                          <button type="button" className="btn text" onClick={() => { window._editingReport = false; loadTask(); }}>
+                            Отмена
+                          </button>
+                        </div>
+                      </form>
                     </div>
                   )}
                 </div>
@@ -735,6 +835,10 @@ export default function TaskDetail({ user }) {
     </Page>
   );
 }
+
+
+
+
 
 
 

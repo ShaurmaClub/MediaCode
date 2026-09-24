@@ -92,7 +92,7 @@ export const auth = (req, res, next) => {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация в системе' });
   }
-  req.user = req.session.user;
+  req.user = { ...req.session.user, role: user.role, status: user.status };
   next();
 };
 
@@ -100,7 +100,7 @@ export const strictAuth = (req, res, next) => {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация в системе' });
   }
-  const user = db.prepare('SELECT status, must_change_password, privacy_consent_at FROM users WHERE id = ?').get(req.session.user.id);
+  const user = db.prepare('SELECT id, login, role, status, must_change_password, privacy_consent_at FROM users WHERE id = ?').get(req.session.user.id);
   if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
   
   if (user.status !== 'ACTIVE') {
@@ -113,7 +113,7 @@ export const strictAuth = (req, res, next) => {
     return res.status(403).json({ error: 'Требуется согласие на обработку персональных данных', code: 'REQUIRES_CONSENT' });
   }
   
-  req.user = req.session.user;
+  req.user = { ...req.session.user, role: user.role, status: user.status };
   next();
 };
 
@@ -147,18 +147,37 @@ export function safeStudentView(u) {
 
 export function safeUser(u) {
   if (!u) return null;
-  const { password_hash, ...safe } = u;
   const total = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM points WHERE user_id = ?').get(u.id)?.total || 0;
   const completedCount = db.prepare("SELECT COUNT(*) as cnt FROM applications WHERE user_id = ? AND status = 'COMPLETED'").get(u.id)?.cnt || 0;
   return {
-    ...safe,
+    id: u.id,
+    public_id: u.public_id,
+    login: u.login,
+    role: u.role,
+    status: u.status,
+    first_name: u.first_name,
+    last_name: u.last_name,
+    middle_name: u.middle_name,
+    email: u.email,
+    department: u.department,
+    group_name: u.group_name,
+    year: u.year,
+    bio: u.bio,
+    skills: u.skills,
+    phone: u.phone,
+    max_contact: u.max_contact,
+    theme: u.theme,
     must_change_password: Boolean(u.must_change_password),
+    privacy_consent_at: u.privacy_consent_at,
+    privacy_policy_version: u.privacy_policy_version,
+    privacy_consent_source: u.privacy_consent_source,
     max_user_id: u.max_user_id || null,
     max_username: u.max_username || null,
     max_contact_verified: Boolean(u.max_contact_verified),
     phone_verified: Boolean(u.phone_verified),
     totalPoints: total,
-    completedTasksCount: completedCount
+    completedTasksCount: completedCount,
+    created_at: u.created_at
   };
 }
 
@@ -329,16 +348,12 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
     return res.status(401).json({ error: 'Неверный логин, номер телефона или пароль.' });
   }
 
-  req.session.user = {
-    id: user.id,
-    login: user.login,
-    role: user.role,
-    first_name: user.first_name,
-    last_name: user.last_name
-  };
-
-  audit(user.id, 'LOGIN_SUCCESS', 'AUTH', user.id);
-  res.json({ user: safeUser(user) });
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Ошибка сессии' });
+    req.session.user = { id: user.id, login: user.login, role: user.role, first_name: user.first_name, last_name: user.last_name };
+    audit(user.id, 'LOGIN_SUCCESS', 'AUTH', user.id);
+    res.json({ user: safeUser(user) });
+  });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -392,8 +407,8 @@ app.post('/api/auth/change-password', auth, authLimiter, (req, res) => {
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ error: 'Заполните старый и новый пароли' });
   }
-  if (String(newPassword).length < 6) {
-    return res.status(400).json({ error: 'Новый пароль должен содержать не менее 6 символов' });
+  if (String(newPassword).length < 8) {
+    return res.status(400).json({ error: 'Новый пароль должен содержать не менее 8 символов' });
   }
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -414,8 +429,8 @@ app.post('/api/auth/first-login-password-change', auth, authLimiter, (req, res) 
   }
 
   const { newLogin, newPassword } = req.body || {};
-  if (!newPassword || String(newPassword).length < 6) {
-    return res.status(400).json({ error: 'Новый пароль должен содержать не менее 6 символов' });
+  if (!newPassword || String(newPassword).length < 8) {
+    return res.status(400).json({ error: 'Новый пароль должен содержать не менее 8 символов' });
   }
 
   let finalLogin = currentUser.login;
@@ -1529,10 +1544,14 @@ app.get('/api/tasks/:id', strictAuth, (req, res) => {
       ORDER BY a.created_at ASC
     `).all(t.id);
 
-    t.applicants = applicants.map((app, idx) => ({
-      ...app,
-      order_num: idx + 1
-    }));
+    t.applicants = applicants.map((app, idx) => {
+      const versions = db.prepare("SELECT * FROM application_versions WHERE application_id = ? ORDER BY version_number DESC").all(app.id);
+      return {
+        ...app,
+        order_num: idx + 1,
+        versions
+      };
+    });
   }
 
   res.json(t);
@@ -1747,33 +1766,70 @@ app.post('/api/tasks/:id/withdraw', strictAuth, role('STUDENT'), (req, res) => {
 });
 
 // Student marks progress or submits completion proof
-app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), uploadLimiter, (req, res) => {
+app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), uploadLimiter, uploadMiddleware.single('file'), (req, res) => {
   const taskId = req.params.id;
   const appRecord = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(taskId, req.user.id);
-  if (!appRecord) return res.status(404).json({ error: 'Вы не являетесь участником этого мероприятия' });
-
-  if (!['SELECTED', 'IN_PROGRESS'].includes(appRecord.status)) {
-    return res.status(400).json({ error: 'Отправка отчёта доступна только для отобранных медиаволонтёров' });
+  if (!appRecord) {
+    if (req.file) storageService.deleteFile(req.file.filename);
+    return res.status(404).json({ error: 'Вы не являетесь участником этого мероприятия' });
   }
 
-  const notes = req.body.submission_notes ? String(req.body.submission_notes).trim() : '';
-  db.prepare(`
-    UPDATE applications
-    SET status = 'COMPLETION_SUBMITTED', submission_notes = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(notes, appRecord.id);
+  if (!['SELECTED', 'IN_PROGRESS', 'COMPLETION_SUBMITTED', 'REVISION_REQUESTED'].includes(appRecord.status)) {
+    if (req.file) storageService.deleteFile(req.file.filename);
+    return res.status(400).json({ error: 'Отправка отчёта недоступна для вашего текущего статуса' });
+  }
+
+  const { comment, materials_url, submission_method } = req.body;
+  const c = comment ? String(comment).trim() : '';
+  const mu = materials_url ? String(materials_url).trim() : '';
+  let filePath = null;
+
+  if (submission_method === 'file') {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не загружен' });
+    }
+    filePath = `/uploads/recruitment/${req.file.filename}`;
+  } else if (submission_method === 'link') {
+    if (!mu) {
+      return res.status(400).json({ error: 'Не указана ссылка' });
+    }
+  }
+
+  // Get next version
+  const v = db.prepare('SELECT COALESCE(MAX(version_number), 0) as m FROM application_versions WHERE application_id = ?').get(appRecord.id).m;
+  const nextVer = v + 1;
+
+  db.exec('BEGIN TRANSACTION;');
+  try {
+    db.prepare(`
+      INSERT INTO application_versions (application_id, version_number, materials_url, file_path, comment, created_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(appRecord.id, nextVer, submission_method === 'link' ? mu : null, filePath, c, req.user.id);
+
+    db.prepare(`
+      UPDATE applications
+      SET status = 'COMPLETION_SUBMITTED', submission_notes = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(c, appRecord.id);
+
+    db.exec('COMMIT;');
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    if (req.file) storageService.deleteFile(req.file.filename);
+    return res.status(500).json({ error: 'Ошибка сохранения отчёта' });
+  }
 
   const task = db.prepare('SELECT creator_id, title FROM tasks WHERE id = ?').get(taskId);
   if (task && task.creator_id) {
     createNotification(
       task.creator_id,
       'Работа сдана медиаволонтёром',
-      `${req.user.first_name} ${req.user.last_name} отправил(а) отчёт по мероприятию «${task.title}»`,
+      `${req.user.first_name} ${req.user.last_name} отправил(а) отчёт (версия ${nextVer}) по мероприятию «${task.title}»`,
       `/tasks/${taskId}`
     );
   }
 
-  audit(req.user.id, 'COMPLETION_SUBMITTED', 'APPLICATION', appRecord.id, { taskId });
+  audit(req.user.id, 'COMPLETION_SUBMITTED', 'APPLICATION', appRecord.id, { taskId, version: nextVer });
   res.json({ ok: true, message: 'Отчёт успешно отправлен на подтверждение сотруднику' });
 });
 
@@ -2182,8 +2238,8 @@ app.post('/api/users', strictAuth, role('ADMIN'), (req, res) => {
   if (d.generate_password || !d.password) {
     finalPassword = generateTemporaryPassword();
   } else {
-    if (String(d.password).length < 6) {
-      return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
+    if (String(d.password).length < 8) {
+      return res.status(400).json({ error: 'Пароль должен содержать минимум 8 символов' });
     }
     finalPassword = String(d.password);
   }
@@ -2285,35 +2341,51 @@ app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
   res.json({ added, errors });
 });
 
-app.post('/api/auth/activation-check', (req, res) => {
+app.post('/api/auth/activation-check', authLimiter, (req, res) => {
   const { phone, token } = req.body;
   const np = normalizeRussianPhone(phone);
-  if (!np) return res.status(400).json({error: 'Неверный формат номера'});
+  if (!np) return res.status(400).json({error: 'Неверные данные'});
   const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
-  if (!user) return res.status(404).json({error: 'Номер телефона не найден или уже активирован'});
-  if (user.activation_token !== String(token).trim()) return res.status(400).json({error: 'Неверный код активации'});
-  res.json({ ok: true });
-});
-
-app.post('/api/auth/activate', authLimiter, (req, res) => {
-  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password, consent_version } = req.body;
-  const np = normalizeRussianPhone(phone);
-  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
-  
-  if (!user) {
-    return res.status(400).json({error: 'Неверный код активации или пользователь не найден'});
-  }
+  if (!user) return res.status(400).json({error: 'Неверный код активации или номер'});
   
   if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
-    return res.status(429).json({error: 'Слишком много неверных попыток. Ввод временно заблокирован. Пожалуйста, подождите 15 минут.'});
+    return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
   }
   
-  if (user.activation_token !== String(token).trim()) {
+  const tokenHash = crypto.createHash('sha256').update(String(token).trim()).digest('hex');
+  if (user.activation_token !== tokenHash || (user.activation_expires_at && new Date(user.activation_expires_at) < new Date())) {
     const attempts = (user.activation_attempts || 0) + 1;
     if (attempts >= 5) {
       const lockUntil = new Date(Date.now() + 15 * 60000).toISOString();
       db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(lockUntil, user.id);
-      return res.status(429).json({error: 'Слишком много неверных попыток. Ввод временно заблокирован. Пожалуйста, подождите 15 минут.'});
+      return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
+    } else {
+      db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
+      return res.status(400).json({error: 'Неверный код активации'});
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/activate', authLimiter, (req, res) => {
+  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password, consent_version, privacy_consent } = req.body;
+  const np = normalizeRussianPhone(phone);
+  if (!privacy_consent) return res.status(400).json({error: 'Требуется согласие на обработку персональных данных'});
+  
+  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
+  if (!user) return res.status(400).json({error: 'Неверный код активации или пользователь не найден'});
+  
+  if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
+    return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
+  }
+  
+  const tokenHash = crypto.createHash('sha256').update(String(token).trim()).digest('hex');
+  if (user.activation_token !== tokenHash || (user.activation_expires_at && new Date(user.activation_expires_at) < new Date())) {
+    const attempts = (user.activation_attempts || 0) + 1;
+    if (attempts >= 5) {
+      const lockUntil = new Date(Date.now() + 15 * 60000).toISOString();
+      db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(lockUntil, user.id);
+      return res.status(429).json({error: 'Слишком много попыток. Ввод заблокирован на 15 минут.'});
     } else {
       db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
       return res.status(400).json({error: 'Неверный код активации'});
@@ -2321,12 +2393,11 @@ app.post('/api/auth/activate', authLimiter, (req, res) => {
   }
 
   if (!first_name || !last_name || !department || !group_name || !login || !password || !consent_version) {
-    return res.status(400).json({error: 'Заполните все обязательные поля и дайте согласие'});
-  }
-  if (password.length < 8) {
-    return res.status(400).json({error: 'Пароль должен содержать минимум 8 символов'});
+    return res.status(400).json({error: 'Заполните все обязательные поля'});
   }
   
+  if (password.length < 8) return res.status(400).json({error: 'Пароль должен содержать минимум 8 символов'});
+
   if (/^\d+$/.test(login.trim())) {
     return res.status(400).json({error: 'Логин не может состоять только из цифр'});
   }
@@ -2334,6 +2405,8 @@ app.post('/api/auth/activate', authLimiter, (req, res) => {
     return res.status(400).json({error: 'Логин не должен быть похож на номер телефона'});
   }
   if (!/^[a-zA-Zа-яА-ЯёЁ0-9_\-\.]+$/.test(login.trim()) || login.trim().length < 3) {
+    return res.status(400).json({error: 'Логин должен быть от 3 символов'});
+  }
     return res.status(400).json({error: 'Логин должен быть от 3 символов и содержать только буквы, цифры, точки, тире или подчёркивания'});
   }
 
@@ -2364,8 +2437,13 @@ app.patch('/api/users/:id', strictAuth, role('ADMIN'), (req, res) => {
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!existing) return res.status(404).json({ error: 'Пользователь не найден' });
 
+  // Prevent self-demotion or self-disable
+  if (targetId == req.user.id && ( (req.body.role && req.body.role !== 'ADMIN') || req.body.status === 'DISABLED' )) {
+    return res.status(403).json({ error: 'Нельзя понизить в должности или отключить самого себя' });
+  }
+
   // Prevent last admin from being disabled or demoted
-  if (existing.role === 'ADMIN' && (req.body.role !== undefined && req.body.role !== 'ADMIN' || req.body.status === 'INACTIVE')) {
+  if (existing.role === 'ADMIN' && (req.body.role !== undefined && req.body.role !== 'ADMIN' || req.body.status === 'DISABLED')) {
     const adminCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE'").get().c;
     if (adminCount <= 1) {
       return res.status(400).json({ error: 'Нельзя деактивировать или изменить роль последнего активного администратора' });
@@ -2429,8 +2507,8 @@ app.post('/api/users/:id/reset-password', strictAuth, role('ADMIN'), authLimiter
   if (generate || !newPassword) {
     finalPassword = generateTemporaryPassword();
   } else {
-    if (String(newPassword).length < 6) {
-      return res.status(400).json({ error: 'Новый пароль должен содержать не менее 6 символов' });
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'Новый пароль должен содержать не менее 8 символов' });
     }
     finalPassword = String(newPassword);
   }
@@ -2512,3 +2590,12 @@ export const server = app.listen(PORT, () => {
 });
 
 export default app;
+
+
+
+
+
+
+
+
+

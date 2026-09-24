@@ -59,7 +59,7 @@ export class ErrorBoundary extends React.Component {
               <strong>{this.state.error && this.state.error.toString()}</strong>
               <br/>
               <span style={{ opacity: 0.8, whiteSpace: 'pre-wrap' }}>
-                {this.state.errorInfo && this.state.errorInfo.componentStack}
+                {import.meta.env.MODE === "development" && this.state.errorInfo && this.state.errorInfo.componentStack}
               </span>
             </div>
 
@@ -78,3 +78,4 @@ export class ErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+

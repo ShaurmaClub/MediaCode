@@ -43,6 +43,15 @@ export default function Login({ onLogin }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loginMode === 'activation') {
+      if (form.login.replace(/\D/g, '').length < 11) {
+        setError('Введите корректный номер телефона.');
+        return;
+      }
+      setActivationPhone(form.login);
+      setActivationMode(true);
+      return;
+    }
     if (loginMode === 'phone' && form.login.replace(/\D/g, '').length < 11) {
       setError('Введите корректный номер телефона.');
       return;
@@ -59,11 +68,13 @@ export default function Login({ onLogin }) {
     setBusy(true);
     setError('');
     try {
-      const data = await api('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(form)
-      });
-      toast.success(`С возвращением, ${data.user.first_name}!`);
+      const data = await api('/auth/login', { method: 'POST', body: JSON.stringify(form) });
+      if (data.requiresActivation) {
+        setActivationPhone(data.phone || form.login);
+        setActivationMode(true);
+        return;
+      }
+      toast.success(С возвращением, !);
       onLogin(data.user);
     } catch (err) {
       setError(err.message);
@@ -103,7 +114,7 @@ export default function Login({ onLogin }) {
       const res = await fetch('/api/auth/activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: activationPhone, ...actForm, consent_version: '2026-09' })
+        body: JSON.stringify({ phone: activationPhone, ...actForm, consent_version: '2026-09', privacy_consent: actConsent })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Ошибка активации');
@@ -150,17 +161,17 @@ export default function Login({ onLogin }) {
             <div style={{ display: 'flex', gap: '12px' }}>
               <div className="form-group" style={{ flex: 1 }}>
                 <label>Отделение <span className="required">*</span></label>
-                <select required value={actForm.department} onChange={e => setActForm({...actForm, department: e.target.value})}>
-                  <option value="">Выберите отделение</option>
-                  <option value="Учебное отделение «Моссовет»">Учебное отделение «Моссовет»</option>
-                  <option value="Учебное отделение «Датахаб»">Учебное отделение «Датахаб»</option>
-                  <option value="Учебное отделение «Техно»">Учебное отделение «Техно»</option>
-                  <option value="Учебное отделение «Протон»">Учебное отделение «Протон»</option>
-                </select>
+                  <input type="text" list="departments" required value={actForm.department} onChange={e => setActForm({...actForm, department: e.target.value})} placeholder="Моссовет" />
+                  <datalist id="departments">
+                    <option value="Учебное отделение «Моссовет»" />
+                    <option value="Учебное отделение «Датахаб»" />
+                    <option value="Учебное отделение «Техно»" />
+                    <option value="Учебное отделение «Протон»" />
+                  </datalist>
               </div>
               <div className="form-group" style={{ width: '120px' }}>
                 <label>Группа <span className="required">*</span></label>
-                <input type="text" required value={actForm.group_name} onChange={e => setActForm({...actForm, group_name: e.target.value})} placeholder="ИС-21" />
+                <input type="text" required value={actForm.group_name} onChange={e => setActForm({...actForm, group_name: e.target.value})} placeholder="ИСП-123" />
               </div>
             </div>
 
@@ -173,7 +184,7 @@ export default function Login({ onLogin }) {
             <div className="form-group">
               <label>Пароль <span className="required">*</span></label>
               <div style={{ position: 'relative' }}>
-                <input type={showActPassword ? 'text' : 'password'} required minLength="6" value={actForm.password} onChange={e => setActForm({...actForm, password: e.target.value})} placeholder="Минимум 6 символов" style={{ width: '100%', paddingRight: '40px' }} />
+                <input type={showActPassword ? 'text' : 'password'} required minLength="6" value={actForm.password} onChange={e => setActForm({...actForm, password: e.target.value})} placeholder="Минимум 8 символов" style={{ width: '100%', paddingRight: '40px' }} />
                 <button type="button" onClick={() => setShowActPassword(!showActPassword)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                   {showActPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -246,12 +257,15 @@ export default function Login({ onLogin }) {
 
           {error && <div className="error-banner">{error}</div>}
 
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: 'var(--surface2)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
-              <button type="button" onClick={() => { setLoginMode('phone'); setForm({...form, login: ''}); }} className={`btn auth-tab-btn ${loginMode === 'phone' ? 'active' : ''}`} >
-                По номеру телефона
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px", background: "var(--surface2)", padding: "4px", borderRadius: "var(--radius-md)" }}>
+              <button type="button" onClick={() => { setLoginMode("phone"); setForm({...form, login: "", password: ""}); }} className={`btn auth-tab-btn ${loginMode === "phone" ? "active" : ""}`} >
+                По телефону
               </button>
-              <button type="button" onClick={() => { setLoginMode('login'); setForm({...form, login: ''}); }} className={`btn auth-tab-btn ${loginMode === 'login' ? 'active' : ''}`} >
+              <button type="button" onClick={() => { setLoginMode("login"); setForm({...form, login: "", password: ""}); }} className={`btn auth-tab-btn ${loginMode === "login" ? "active" : ""}`} >
                 По логину
+              </button>
+              <button type="button" onClick={() => { setLoginMode("activation"); setForm({...form, login: "", password: ""}); setError(""); }} className={`btn auth-tab-btn ${loginMode === "activation" ? "active" : ""}`} >
+                Первый вход / Активация
               </button>
             </div>
 
@@ -335,6 +349,13 @@ export default function Login({ onLogin }) {
     </div>
   );
 }
+
+
+
+
+
+
+
 
 
 
