@@ -92,7 +92,7 @@ export const auth = (req, res, next) => {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация в системе' });
   }
-  req.user = { ...req.session.user, role: user.role, status: user.status };
+  req.user = req.session.user;
   next();
 };
 
@@ -2327,15 +2327,17 @@ app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
     const exist = db.prepare('SELECT id FROM users WHERE phone = ?').get(np);
     if (exist) { errors.push({ phone: np, error: 'Уже существует' }); continue; }
     
-    const token = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const tempLogin = 'pending_' + Date.now() + '_' + Math.floor(Math.random()*10000);
-    
-    db.prepare(`
-      INSERT INTO users (login, password_hash, role, phone, status, activation_token, must_change_password)
-      VALUES (?, '', 'STUDENT', ?, 'PENDING_ACTIVATION', ?, 0)
-    `).run(tempLogin, np, token);
-    
-    added.push({ phone: np, token });
+    const rawToken = crypto.randomBytes(3).toString('hex').toUpperCase();
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const tempLogin = 'pending_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      
+      db.prepare(`
+        INSERT INTO users (login, password_hash, role, phone, status, activation_token, activation_expires_at, must_change_password)
+        VALUES (?, '', 'STUDENT', ?, 'PENDING_ACTIVATION', ?, ?, 0)
+      `).run(tempLogin, np, tokenHash, expiresAt);
+      
+      added.push({ phone: np, token: rawToken });
   }
 
   res.json({ added, errors });
@@ -2405,8 +2407,6 @@ app.post('/api/auth/activate', authLimiter, (req, res) => {
     return res.status(400).json({error: 'Логин не должен быть похож на номер телефона'});
   }
   if (!/^[a-zA-Zа-яА-ЯёЁ0-9_\-\.]+$/.test(login.trim()) || login.trim().length < 3) {
-    return res.status(400).json({error: 'Логин должен быть от 3 символов'});
-  }
     return res.status(400).json({error: 'Логин должен быть от 3 символов и содержать только буквы, цифры, точки, тире или подчёркивания'});
   }
 
@@ -2590,6 +2590,8 @@ export const server = app.listen(PORT, () => {
 });
 
 export default app;
+
+
 
 
 

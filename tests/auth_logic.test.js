@@ -106,20 +106,20 @@ describe('Comprehensive Auth & Logic Tests', () => {
     assert.equal(r14.data.requiresActivation, true);
 
     // 16. invalid code
-    const r16 = await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG' });
+    const r16 = await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG', privacy_consent: true });
     assert.equal(r16.status, 400);
 
     // 19. brute force lock (try 5 times)
-    await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG' });
-    await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG' });
-    await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG' });
-    const r19 = await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG' });
+    await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG', privacy_consent: true });
+    await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG', privacy_consent: true });
+    await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG', privacy_consent: true });
+    const r19 = await apiCall('POST', '/auth/activate', { phone: '+79001112233', token: 'WRONG', privacy_consent: true });
     assert.equal(r19.status, 429); // locked!
     
     // 15. correct activation (using second user to avoid lock)
     const p2 = mass.data.added[1];
     const r15 = await apiCall('POST', '/auth/activate', {
-      phone: '+79001112244', token: p2.token, first_name: 'Новый', last_name: 'Юзер', department: 'Учебное отделение «Моссовет»', group_name: 'ТЕСТ-1', group_name: 'ГР-1', login: 'new_user2', password: 'password8', consent_version: '2026-09'
+      phone: '+79001112244', token: p2.token, first_name: 'Новый', last_name: 'Юзер', department: 'Учебное отделение «Моссовет»', group_name: 'ТЕСТ-1', group_name: 'ГР-1', login: 'new_user2', password: 'password8', consent_version: '2026-09', privacy_consent: true
     });
     assert.equal(r15.status, 200);
   });
@@ -151,3 +151,4 @@ describe('Comprehensive Auth & Logic Tests', () => {
     if(applyDiffTrack.status !== 201) console.log('ERROR:', applyDiffTrack); assert.equal(applyDiffTrack.status, 201); // diff track allowed
   });
 });
+
