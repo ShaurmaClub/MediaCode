@@ -74,7 +74,7 @@ export default function Login({ onLogin }) {
         setActivationMode(true);
         return;
       }
-      toast.success(С возвращением, !);
+      toast.success(`С возвращением, ${data.user.first_name}!`);
       onLogin(data.user);
     } catch (err) {
       setError(err.message);
