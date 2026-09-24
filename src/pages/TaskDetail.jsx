@@ -20,6 +20,7 @@ import { api, formatDate, formatDateTime, relativeTime } from '../api.js';
 import { Page, Loader, Empty, StatusBadge, PriorityBadge, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import { isValidYandexDiskLink } from './PublicRecruitment.jsx';
 
 export default function TaskDetail({ user }) {
   const { id } = useParams();
@@ -719,3 +720,4 @@ export default function TaskDetail({ user }) {
     </Page>
   );
 }
+

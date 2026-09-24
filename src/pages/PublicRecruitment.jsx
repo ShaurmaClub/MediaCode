@@ -988,7 +988,7 @@ export default function PublicRecruitment() {
                           onChange={(e) => setConsent(e.target.checked)}
                         />
                         <span>
-                            Я даю согласие на <a href="/privacy-policy" target="_blank" className="text-link inline-policy-btn" onClick={(e) => e.stopPropagation()}>обработку персональных данных</a> в целях участия в конкурсном отборе медиацентра «МедиаКод» *
+                            Я даю согласие на <a href="/privacy-policy" target="_blank" className="text-link inline-policy-btn" style={{ display: "inline" }} onClick={(e) => e.stopPropagation()}>обработку персональных данных</a> в целях участия в конкурсном отборе медиацентра «МедиаКод» *
                           </span>
                       </label>
                     </div>
@@ -1013,5 +1013,6 @@ export default function PublicRecruitment() {
           </div>
   );
 }
+
 
 

@@ -190,7 +190,7 @@ export default function Login({ onLogin }) {
                   style={{ marginTop: '2px' }}
                 />
                 <span style={{ fontSize: '12px', lineHeight: 1.4 }}>
-                  Я даю <a href="/privacy-policy" target="_blank" className="text-link" onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы кабинета.
+                  Я даю <a href="/privacy-policy" target="_blank" className="text-link" style={{ display: "inline" }} onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы кабинета.
                 </span>
               </label>
             </div>
@@ -335,6 +335,7 @@ export default function Login({ onLogin }) {
     </div>
   );
 }
+
 
 
 

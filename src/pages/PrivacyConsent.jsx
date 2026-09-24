@@ -57,11 +57,11 @@ export default function PrivacyConsent({ user, onConsented, onLogout }) {
               type="checkbox"
               checked={checked}
               onChange={e => setChecked(e.target.checked)}
-              style={{ flexShrink: 0, marginTop: '4px', width: '18px', height: '18px' }}
+              style={{ flexShrink: 0, marginTop: "2px", accentColor: "var(--accent)" }}
             />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={{ fontSize: '14px', lineHeight: 1.4, fontWeight: 500 }}>
-                Я даю согласие на <a href="/privacy-policy" target="_blank" className="text-link" onClick={e => e.stopPropagation()}>обработку персональных данных</a>
+                Я даю согласие на <a href="/privacy-policy" target="_blank" className="text-link" style={{ display: "inline" }} onClick={e => e.stopPropagation()}>обработку персональных данных</a>
               </span>
               <span className="muted" style={{ fontSize: '12px', lineHeight: 1.4, fontWeight: 400 }}>
                 Согласие требуется для работы личного кабинета медиаволонтёра.
@@ -83,3 +83,5 @@ export default function PrivacyConsent({ user, onConsented, onLogout }) {
     </div>
   );
 }
+
+

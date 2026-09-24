@@ -73,6 +73,10 @@ function App() {
 
   const location = useLocation();
 
+  if (location.pathname === '/privacy-policy') {
+    return <PrivacyPolicy />;
+  }
+
   if (loading) {
     return (
       <div className="splash">
@@ -187,3 +191,4 @@ createRoot(rootElement).render(
     </ToastProvider>
   </BrowserRouter>
 );
+
