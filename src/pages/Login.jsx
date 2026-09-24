@@ -224,9 +224,11 @@ export default function Login({ onLogin }) {
                   <input type="text" list="departments" required value={actForm.department} onChange={e => setActForm({...actForm, department: e.target.value})} placeholder="Моссовет" />
                   <datalist id="departments">
                     <option value="Учебное отделение «Моссовет»" />
-                    <option value="Учебное отделение «Датахаб»" />
                     <option value="Учебное отделение «Техно»" />
-                    <option value="Учебное отделение «Протон»" />
+                    <option value="Учебное отделение «Датахаб»" />
+                    <option value="Учебное отделение «АртТех»" />
+                    <option value="Учебное отделение «Кибер»" />
+                    <option value="Учебное отделение «Диджитал»" />
                   </datalist>
               </div>
               <div className="form-group" style={{ width: '120px' }}>
