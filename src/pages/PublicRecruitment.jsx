@@ -362,6 +362,7 @@ export default function PublicRecruitment() {
     formData.append('submission_text', textToSend);
     formData.append('comment', comment.trim());
     formData.append('consent', 'true');
+    formData.append('consent_version', '2026-09-25');
 
     for (const file of filesToSend) {
       formData.append('files', file);
@@ -1013,6 +1014,5 @@ export default function PublicRecruitment() {
           </div>
   );
 }
-
 
 

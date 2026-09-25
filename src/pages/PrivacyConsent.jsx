@@ -18,7 +18,7 @@ export default function PrivacyConsent({ user, onConsented, onLogout }) {
     try {
       const res = await api('/auth/privacy-consent', {
         method: 'POST',
-        body: JSON.stringify({ consent_version: 'draft-2026-09' })
+        body: JSON.stringify({ consent: true, consent_version: '2026-09-25' })
       });
       onConsented(res.user);
     } catch (err) {
@@ -83,5 +83,4 @@ export default function PrivacyConsent({ user, onConsented, onLogout }) {
     </div>
   );
 }
-
 

@@ -15,10 +15,12 @@ import { validateMaxInitData, sendMaxNotification, getMaxConfig } from './max.js
 import { MAX_POINTS_PER_TRANSACTION, EVENT_CATEGORIES } from './config/eventCategories.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
+// Version of the MediaCode-specific consent text.
+export const MEDIACODE_CONSENT_VERSION = '2026-09-25';
 
 // Production security check: SESSION_SECRET must be explicitly set and secure
 if (isProduction) {
-  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.includes('change-me') || process.env.SESSION_SECRET.includes('secret-key')) {
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32 || process.env.SESSION_SECRET.includes('change-me') || process.env.SESSION_SECRET.includes('secret-key')) {
     console.error('CRITICAL ERROR: В режиме production переменная окружения SESSION_SECRET обязательна и должна содержать надёжный уникальный секретный ключ.');
     process.exit(1);
   }
@@ -38,8 +40,8 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: false, limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
 if (isProduction && !process.env.SESSION_SECRET) {
   console.error("FATAL ERROR: SESSION_SECRET is not set in production!");
@@ -59,7 +61,19 @@ app.use(session({
   }
 }));
 
-// Rate limiter for auth endpoints
+// Shared college NATs must not turn one IP into one user. Per-account limits
+// stop credential stuffing while this broad ceiling protects the server.
+const authIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1200, standardHeaders: true, legacyHeaders: false });
+const authIdentityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const value = req.body?.phone || req.body?.login || req.body?.loginOrContact || 'missing';
+    return String(value).replace(/\D/g, '') || String(value).trim().toLowerCase();
+  }
+});
 
 // Rate limiter for uploads and reports
 const uploadLimiter = rateLimit({
@@ -70,13 +84,14 @@ const uploadLimiter = rateLimit({
   message: { error: 'Превышен лимит загрузок. Пожалуйста, подождите час.' }
 });
 
-const authLimiter = rateLimit({
+const authLimiterLegacy = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Слишком много попыток. Пожалуйста, подождите 15 минут.' }
 });
+const authLimiter = authIdentityLimiter;
 
 // Rate limiter for public recruitment application submissions
 const recruitmentApplyLimiter = rateLimit({
@@ -320,7 +335,7 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 
-app.post('/api/auth/login', authLimiter, (req, res) => {
+app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
   const { login, password } = req.body || {};
   if (!login || !password) {
     return res.status(400).json({ error: 'Укажите логин/номер телефона и пароль' });
@@ -462,8 +477,8 @@ app.post('/api/auth/first-login-password-change', auth, authLimiter, (req, res) 
 
 // User changes login in account settings (requires current password)
 app.post('/api/auth/privacy-consent', auth, (req, res) => {
-  const { consent_version } = req.body;
-  if (!consent_version) {
+  const { consent, consent_version } = req.body || {};
+  if (consent !== true || !consent_version) {
     return res.status(400).json({ error: 'Требуется версия политики' });
   }
   
@@ -570,6 +585,11 @@ app.post('/api/auth/max-mini-app', (req, res) => {
         first_name: maxUser.first_name
       }
     });
+  }
+
+  const linkedElsewhere = db.prepare('SELECT id FROM users WHERE max_user_id = ? AND id != ?').get(String(maxUser.id), user.id);
+  if (linkedElsewhere) {
+    return res.status(409).json({ error: 'MAX identity is already linked to another account' });
   }
 
   // Update max_user_id & verification if not yet set
@@ -1070,7 +1090,7 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
           INSERT INTO recruitment_applications (
             public_id, track_id, full_name, department, group_name, phone, max_contact,
             portfolio_url, submission_url, submission_text, comment, status, consent_version, consent_accepted_at, privacy_consent_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', 'draft-2026-09', CURRENT_TIMESTAMP, 'recruitment')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', ?, CURRENT_TIMESTAMP, 'recruitment')
         `).run(
           publicId,
           track.id,
@@ -1082,7 +1102,8 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
           portfolio_url ? String(portfolio_url).trim() : null,
           submission_url ? String(submission_url).trim() : null,
           submission_text ? String(submission_text).trim() : null,
-          comment ? String(comment).trim() : null
+          comment ? String(comment).trim() : null,
+          MEDIACODE_CONSENT_VERSION
         );
 
         appId = r.lastInsertRowid;
@@ -1237,7 +1258,7 @@ app.get('/api/recruitment/files/:id/download', strictAuth, role('STAFF', 'ADMIN'
 
   try {
     const safePath = storageService.getSafeFilePath(fileRecord.stored_name);
-    if (!path.resolve(safePath)) {
+    if (!fs.existsSync(safePath)) {
       return res.status(404).json({ error: 'Файл отсутствует на диске' });
     }
     res.download(safePath, fileRecord.original_name);
@@ -2353,7 +2374,7 @@ app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
   res.json({ added, errors });
 });
 
-app.post('/api/auth/first-login-check', authLimiter, (req, res) => {
+app.post('/api/auth/first-login-check', authIpLimiter, authLimiter, (req, res) => {
   const { phone } = req.body;
   const np = normalizeRussianPhone(phone);
   if (!np) return res.status(400).json({error: 'Неверные данные'});
@@ -2369,14 +2390,30 @@ app.post('/api/auth/first-login-check', authLimiter, (req, res) => {
   res.json({ ok: true, user: { first_name: user.first_name, last_name: user.last_name, group_name: user.group_name } });
 });
 
-app.post('/api/auth/activate', authLimiter, (req, res) => {
-  const { phone, first_name, last_name, middle_name, department, group_name, login, password, consent_version, privacy_consent } = req.body;
+app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
+  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password, consent_version, privacy_consent } = req.body || {};
   const np = normalizeRussianPhone(phone);
   if (!privacy_consent) return res.status(400).json({error: 'Требуется согласие на обработку персональных данных'});
   
   const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
   if (!user) return res.status(400).json({error: 'Пользователь не найден или уже активирован'});
   
+  if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
+    return res.status(429).json({ error: 'Too many activation attempts. Please wait 15 minutes.' });
+  }
+  const tokenHash = crypto.createHash('sha256').update(String(token || '').trim()).digest('hex');
+  const validToken = user.activation_token && crypto.timingSafeEqual(Buffer.from(user.activation_token), Buffer.from(tokenHash));
+  const expired = !user.activation_expires_at || new Date(user.activation_expires_at) <= new Date();
+  if (!validToken || expired) {
+    const attempts = Number(user.activation_attempts || 0) + 1;
+    if (attempts >= 5) {
+      db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(new Date(Date.now() + 15 * 60 * 1000).toISOString(), user.id);
+      return res.status(429).json({ error: 'Too many activation attempts. Please wait 15 minutes.' });
+    }
+    db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
+    return res.status(400).json({ error: 'Invalid or expired activation code' });
+  }
+
   if (!first_name || !last_name || !department || !group_name || !login || !password || !consent_version) {
     return res.status(400).json({error: 'Заполните все обязательные поля'});
   }
@@ -2406,9 +2443,9 @@ app.post('/api/auth/activate', authLimiter, (req, res) => {
   
   db.prepare(`
     UPDATE users 
-    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL, privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?
+    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL, activation_expires_at=NULL, activation_attempts=0, activation_locked_until=NULL, privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?, privacy_consent_source='activation'
     WHERE id=?
-  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, consent_version, user.id);
+  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, MEDIACODE_CONSENT_VERSION, user.id);
   
   audit(user.id, 'USER_ACTIVATED', 'AUTH', user.id);
   res.json({ok: true, message: 'Аккаунт активирован. Вы можете войти.'});
@@ -2551,18 +2588,19 @@ app.get('/api/audit', strictAuth, role('ADMIN'), (req, res) => {
 
 app.get('/api/tasks/files/download', strictAuth, (req, res) => {
   const filePath = req.query.path;
-  if (!filePath || !filePath.startsWith('/uploads/recruitment/')) {
+  if (!filePath || typeof filePath !== 'string') {
     return res.status(400).json({ error: 'Неверный путь к файлу' });
   }
 
   // Find if this path belongs to an application version accessible by the user.
   // Actually, we should check if the user is STAFF/ADMIN or if it's the student's own application.
+  const version = db.prepare('SELECT v.file_path, a.user_id FROM application_versions v JOIN applications a ON v.application_id = a.id WHERE v.file_path = ?').get(filePath);
+  if (!version) return res.status(404).json({ error: 'File not found' });
   let isAuthorized = false;
   if (req.user.role === 'STAFF' || req.user.role === 'ADMIN') {
     isAuthorized = true;
   } else {
     // Check if the user owns this file
-    const version = db.prepare('SELECT a.user_id FROM application_versions v JOIN applications a ON v.application_id = a.id WHERE v.file_path = ?').get(filePath);
     if (version && version.user_id === req.user.id) {
       isAuthorized = true;
     }
@@ -2572,7 +2610,7 @@ app.get('/api/tasks/files/download', strictAuth, (req, res) => {
     return res.status(403).json({ error: 'Доступ запрещен' });
   }
 
-  const filename = filePath.replace('/uploads/recruitment/', '');
+  const filename = path.basename(filePath);
   try {
     const safePath = storageService.getSafeFilePath(filename);
     if (!fs.existsSync(safePath)) {
@@ -2609,14 +2647,5 @@ export const server = app.listen(PORT, () => {
 });
 
 export default app;
-
-
-
-
-
-
-
-
-
 
 

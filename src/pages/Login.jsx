@@ -139,7 +139,7 @@ export default function Login({ onLogin }) {
       const res = await fetch('/api/auth/activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: activationPhone, ...actForm, consent_version: '2026-09', privacy_consent: actConsent })
+        body: JSON.stringify({ phone: activationPhone, ...actForm, consent_version: '2026-09-25', privacy_consent: actConsent })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Ошибка активации');
@@ -206,6 +206,11 @@ export default function Login({ onLogin }) {
           )}
 
             
+
+            <div className="form-group">
+              <label>Код активации <span className="required">*</span></label>
+              <input type="text" required value={actForm.token} onChange={e => setActForm({...actForm, token: e.target.value})} autoComplete="one-time-code" />
+            </div>
 
             <div style={{ display: 'flex', gap: '12px' }}>
               <div className="form-group" style={{ flex: 1 }}>
@@ -423,7 +428,6 @@ export default function Login({ onLogin }) {
     </div>
   );
 }
-
 
 
 

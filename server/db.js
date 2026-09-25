@@ -44,8 +44,10 @@ CREATE TABLE IF NOT EXISTS users (
     phone_verified INTEGER DEFAULT 0,
     must_change_password INTEGER DEFAULT 0,
     activation_token TEXT,
+    activation_expires_at TEXT,
     privacy_consent_at TEXT DEFAULT NULL,
     privacy_policy_version TEXT DEFAULT NULL,
+    privacy_consent_source TEXT DEFAULT NULL,
     activation_attempts INTEGER DEFAULT 0,
     activation_locked_until TEXT DEFAULT NULL
   );
@@ -241,7 +243,8 @@ ensureColumn('users', 'phone_verified', 'INTEGER DEFAULT 0');
   ensureColumn('recruitment_applications', 'privacy_consent_source', 'TEXT DEFAULT NULL');
   ensureColumn('users', 'activation_attempts', 'INTEGER DEFAULT 0');
   ensureColumn('users', 'activation_locked_until', 'TEXT DEFAULT NULL');
-  ensureColumn('users', 'activation_expires_at', 'TEXT DEFAULT NULL');
+ensureColumn('users', 'activation_expires_at', 'TEXT DEFAULT NULL');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_max_user_id_unique ON users(max_user_id) WHERE max_user_id IS NOT NULL');
 ensureColumn('tasks', 'updated_at', 'TEXT');
 ensureColumn('tasks', 'end_time', 'TEXT');
 ensureColumn('tasks', 'equipment', 'TEXT');
@@ -656,7 +659,6 @@ try {
 } catch (err) {
   console.error('Failed to set mock user phones:', err);
 }
-
 
 
 

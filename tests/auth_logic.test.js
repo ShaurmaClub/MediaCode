@@ -94,6 +94,20 @@ describe('Comprehensive Auth & Logic Tests', () => {
     if(r11.status !== 201) console.log('ERROR:', r11); assert.equal(r11.status, 201);
   });
 
+  test('ACTIVATION SECURITY: code, expiry, lockout, one-time use and consent', async () => {
+    const phone = '+79991234567';
+    const created = await apiCall('POST', '/users/mass-create', { phones: [phone] }, adminCookie);
+    assert.equal(created.status, 200);
+    const token = created.data.added[0].token;
+    const payload = { phone, token: 'WRONG', first_name: 'Тест', last_name: 'Тестов', department: 'Учебное отделение «Моссовет»', group_name: 'ТЕСТ-1', login: 'activation_test', password: 'Password123!', consent_version: '2026-09-25', privacy_consent: true };
+    assert.equal((await apiCall('POST', '/auth/activate', payload)).status, 400);
+    const noConsent = { ...payload, token, privacy_consent: false, login: 'activation_no_consent' };
+    assert.equal((await apiCall('POST', '/auth/activate', noConsent)).status, 400);
+    const activated = await apiCall('POST', '/auth/activate', { ...payload, token });
+    assert.equal(activated.status, 200);
+    assert.equal((await apiCall('POST', '/auth/activate', { ...payload, token, login: 'activation_reuse' })).status, 400);
+  });
+
   test('RECRUITMENT 41-44: Resubmissions', async () => {
     const apply1 = await apiCall('POST', '/public/recruitment/apply/smm', {
       full_name: 'Тест', phone: '+79991112233', department: 'Учебное отделение «Моссовет»', group_name: 'ТЕСТ-1', submission_text: 'Text', phone_is_max: 'true', consent: 'true'
@@ -111,4 +125,3 @@ describe('Comprehensive Auth & Logic Tests', () => {
     if(applyDiffTrack.status !== 201) console.log('ERROR:', applyDiffTrack); assert.equal(applyDiffTrack.status, 201); // diff track allowed
   });
 });
-

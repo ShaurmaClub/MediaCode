@@ -95,9 +95,11 @@ describe('Privacy and Phone Logic Tests', () => {
     const loginRes = await apiCall('POST', '/auth/login', { login: 'student', password: 'Demo123!' });
     const studentCookie = loginRes.cookie;
 
-    const consentRes = await apiCall('POST', '/auth/privacy-consent', { consent_version: '2026-09' }, studentCookie);
+    const rejectedConsent = await apiCall('POST', '/auth/privacy-consent', { consent_version: '2026-09' }, studentCookie);
+    assert.equal(rejectedConsent.status, 400);
+    const consentRes = await apiCall('POST', '/auth/privacy-consent', { consent: true, consent_version: '2026-09-25' }, studentCookie);
     assert.equal(consentRes.status, 200);
-    assert.equal(consentRes.data.user.privacy_policy_version, '2026-09');
+    assert.equal(consentRes.data.user.privacy_policy_version, '2026-09-25');
 
     // Dashboard works now
     const dash2 = await apiCall('GET', '/dashboard', null, studentCookie);

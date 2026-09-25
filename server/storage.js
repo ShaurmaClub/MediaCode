@@ -47,7 +47,7 @@ function fileFilter(req, file, cb) {
 
 export const uploadMiddleware = multer({
   storage: storageEngine,
-  limits: { fileSize: MAX_FILE_SIZE },
+  limits: { fileSize: MAX_FILE_SIZE, files: 10, fields: 30, parts: 40 },
   fileFilter
 });
 
