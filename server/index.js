@@ -378,9 +378,12 @@ app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
 app.post('/api/auth/registration-start', authIpLimiter, authLimiter, (req, res) => {
   const phone = normalizeRussianPhone(req.body?.phone);
   if (!phone || req.body?.privacy_consent !== true) return res.status(400).json({ error: 'Требуется согласие на обработку персональных данных.' });
-  const user = db.prepare("SELECT id FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(phone);
-  if (!user) return res.status(400).json({ error: 'Регистрация для этого номера недоступна.' });
-  db.prepare("UPDATE users SET privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?, privacy_consent_source='registration_start' WHERE id=?").run(MEDIACODE_CONSENT_VERSION, user.id);
+  const user = db.prepare("SELECT id, status FROM users WHERE phone = ?").get(phone);
+    if (user && user.status === 'ACTIVE') return res.status(400).json({ error: 'Аккаунт уже активирован, используйте вход по логину или телефону.' });
+    if (user && user.status === 'PENDING_ACTIVATION') {
+      db.prepare("UPDATE users SET privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?, privacy_consent_source='registration_start' WHERE id=?").run(MEDIACODE_CONSENT_VERSION, user.id);
+    }
+    // If !user, they proceed to fill the form and will be inserted as PENDING_APPROVAL during /activate
   res.json({ ok: true, phone });
 });
 
@@ -2404,29 +2407,9 @@ app.post('/api/auth/first-login-check', authIpLimiter, authLimiter, (req, res) =
 });
 
 app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
-  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password } = req.body || {};
+  const { phone, first_name, last_name, middle_name, department, group_name, login, password } = req.body || {};
   const np = normalizeRussianPhone(phone);
   
-  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
-  if (!user) return res.status(400).json({error: 'Пользователь не найден или уже активирован'});
-  if (!user.privacy_consent_at || user.privacy_consent_source !== 'registration_start' || user.privacy_policy_version !== MEDIACODE_CONSENT_VERSION) return res.status(400).json({ error: 'Согласие на обработку персональных данных не подтверждено.' });
-  
-  if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
-    return res.status(429).json({ error: 'Too many activation attempts. Please wait 15 minutes.' });
-  }
-  const tokenHash = crypto.createHash('sha256').update(String(token || '').trim()).digest('hex');
-  const validToken = user.activation_token && crypto.timingSafeEqual(Buffer.from(user.activation_token), Buffer.from(tokenHash));
-  const expired = !user.activation_expires_at || new Date(user.activation_expires_at) <= new Date();
-  if (!validToken || expired) {
-    const attempts = Number(user.activation_attempts || 0) + 1;
-    if (attempts >= 5) {
-      db.prepare('UPDATE users SET activation_attempts = 0, activation_locked_until = ? WHERE id = ?').run(new Date(Date.now() + 15 * 60 * 1000).toISOString(), user.id);
-      return res.status(429).json({ error: 'Too many activation attempts. Please wait 15 minutes.' });
-    }
-    db.prepare('UPDATE users SET activation_attempts = ? WHERE id = ?').run(attempts, user.id);
-    return res.status(400).json({ error: 'Invalid or expired activation code' });
-  }
-
   if (!first_name || !last_name || !department || !group_name || !login || !password) {
     return res.status(400).json({error: 'Заполните все обязательные поля'});
   }
@@ -2454,14 +2437,31 @@ app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
 
   const hash = bcrypt.hashSync(password, 10);
   
-  db.prepare(`
-    UPDATE users 
-    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='PENDING_APPROVAL', activation_token=NULL, activation_expires_at=NULL, activation_attempts=0, activation_locked_until=NULL
-    WHERE id=?
-  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, user.id);
-  
-  audit(user.id, 'USER_ACTIVATED', 'AUTH', user.id);
-  res.json({ok: true, message: 'Регистрация отправлена на подтверждение администратору.'});
+  const user = db.prepare("SELECT * FROM users WHERE phone = ?").get(np);
+
+  if (user) {
+    if (user.status === 'ACTIVE') return res.status(400).json({error: 'Аккаунт уже активирован'});
+    if (user.status === 'DISABLED') return res.status(400).json({error: 'Аккаунт заблокирован'});
+    
+    // existing user (PENDING_ACTIVATION or PENDING_APPROVAL) becomes ACTIVE
+    db.prepare(`
+      UPDATE users 
+      SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL, activation_expires_at=NULL, activation_attempts=0, activation_locked_until=NULL, privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?, privacy_consent_source='registration_start'
+      WHERE id=?
+    `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, MEDIACODE_CONSENT_VERSION, user.id);
+    
+    audit(user.id, 'USER_ACTIVATED', 'AUTH', user.id);
+    res.json({ok: true, message: 'Аккаунт активирован! Используйте логин и пароль для входа.'});
+  } else {
+    // new user becomes PENDING_APPROVAL
+    const result = db.prepare(`
+      INSERT INTO users (phone, first_name, last_name, middle_name, department, group_name, login, password_hash, status, role, privacy_consent_at, privacy_policy_version, privacy_consent_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_APPROVAL', 'STUDENT', CURRENT_TIMESTAMP, ?, 'registration_start')
+    `).run(np, normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, MEDIACODE_CONSENT_VERSION);
+    
+    audit(result.lastInsertRowid, 'USER_REGISTERED', 'AUTH', result.lastInsertRowid);
+    res.json({ok: true, message: 'Регистрация отправлена на подтверждение администратору.'});
+  }
 });
 
 app.get('/api/admin/registrations/pending', strictAuth, role('ADMIN'), (req, res) => {

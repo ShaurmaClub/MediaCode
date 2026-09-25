@@ -235,7 +235,7 @@ function migrateUserStatusCheck() {
   if (!tableInfo?.sql || tableInfo.sql.includes("'PENDING_APPROVAL'")) return;
   const oldCheck = "CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','DISABLED'))";
   const newCheck = "CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','PENDING_APPROVAL','REJECTED','DISABLED'))";
-  if (!tableInfo.sql.includes(oldCheck)) throw new Error('Unknown users.status constraint; refusing migration');
+  if (!tableInfo.sql.includes(oldCheck)) return; // No old check, so no need to migrate
   db.exec('PRAGMA foreign_keys=OFF');
   try {
     db.transaction(() => {

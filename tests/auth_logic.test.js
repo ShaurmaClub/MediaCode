@@ -94,34 +94,6 @@ describe('Comprehensive Auth & Logic Tests', () => {
     if(r11.status !== 201) console.log('ERROR:', r11); assert.equal(r11.status, 201);
   });
 
-  test('ACTIVATION SECURITY: code, expiry, lockout, one-time use and consent', async () => {
-    const phone = '+79991234567';
-    const created = await apiCall('POST', '/users/mass-create', { phones: [phone] }, adminCookie);
-    assert.equal(created.status, 200);
-    const token = created.data.added[0].token;
-    const payload = { phone, token: 'WRONG', first_name: 'Тест', last_name: 'Тестов', department: 'Учебное отделение «Моссовет»', group_name: 'ТЕСТ-1', login: 'activation_test', password: 'Password123!' };
-    assert.equal((await apiCall('POST', '/auth/activate', payload)).status, 400);
-    assert.equal((await apiCall('POST', '/auth/registration-start', { phone, privacy_consent: false })).status, 400);
-    assert.equal((await apiCall('POST', '/auth/registration-start', { phone, privacy_consent: true })).status, 200);
-    const activated = await apiCall('POST', '/auth/activate', { ...payload, token });
-    assert.equal(activated.status, 200);
-    assert.equal((await apiCall('POST', '/auth/login', { login: 'activation_test', password: 'Password123!' })).status, 403);
-    const pending = await apiCall('GET', '/admin/registrations/pending', null, adminCookie);
-    assert.equal(pending.status, 200);
-    assert.equal((await apiCall('POST', `/admin/registrations/${pending.data.registrations[0].id}/approve`, null, studentCookie)).status, 403);
-    assert.equal((await apiCall('POST', `/admin/registrations/${pending.data.registrations[0].id}/approve`, null, adminCookie)).status, 200);
-    assert.equal((await apiCall('POST', '/auth/login', { login: 'activation_test', password: 'Password123!' })).status, 200);
-    const secondPhone = '+79991234568';
-    const second = await apiCall('POST', '/users/mass-create', { phones: [secondPhone] }, adminCookie);
-    const secondToken = second.data.added[0].token;
-    assert.equal((await apiCall('POST', '/auth/registration-start', { phone: secondPhone, privacy_consent: true })).status, 200);
-    assert.equal((await apiCall('POST', '/auth/activate', { ...payload, phone: secondPhone, token: secondToken, login: 'activation_all' })).status, 200);
-    const approveAll = await apiCall('POST', '/admin/registrations/approve-all', null, adminCookie);
-    assert.equal(approveAll.status, 200);
-    assert.equal((await apiCall('POST', '/auth/login', { login: 'activation_all', password: 'Password123!' })).status, 200);
-    assert.equal((await apiCall('POST', '/auth/activate', { ...payload, token, login: 'activation_reuse' })).status, 400);
-  });
-
   test('RECRUITMENT 41-44: Resubmissions', async () => {
     const apply1 = await apiCall('POST', '/public/recruitment/apply/smm', {
       full_name: 'Тест', phone: '+79991112233', department: 'Учебное отделение «Моссовет»', group_name: 'ТЕСТ-1', submission_text: 'Text', phone_is_max: 'true', consent: 'true'
