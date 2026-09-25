@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
     phone TEXT,
     max_contact TEXT,
     skills TEXT,
-    status TEXT DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','DISABLED')),
+    status TEXT DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','PENDING_APPROVAL','REJECTED','DISABLED')),
     theme TEXT DEFAULT 'system' CHECK(theme IN ('light','dark','system','violet','red')),
     joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
     max_user_id INTEGER,
@@ -227,6 +227,29 @@ function migrateThemeCheck() {
   }
 }
 migrateThemeCheck();
+
+// SQLite cannot alter CHECK constraints. This one-time, transactional rebuild only
+// expands the allowed account states and preserves every existing column and row.
+function migrateUserStatusCheck() {
+  const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (!tableInfo?.sql || tableInfo.sql.includes("'PENDING_APPROVAL'")) return;
+  const oldCheck = "CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','DISABLED'))";
+  const newCheck = "CHECK(status IN ('ACTIVE','PENDING_ACTIVATION','PENDING_APPROVAL','REJECTED','DISABLED'))";
+  if (!tableInfo.sql.includes(oldCheck)) throw new Error('Unknown users.status constraint; refusing migration');
+  db.exec('PRAGMA foreign_keys=OFF');
+  try {
+    db.transaction(() => {
+      db.exec(tableInfo.sql.replace('CREATE TABLE users', 'CREATE TABLE users_status_migration').replace(oldCheck, newCheck));
+      const columns = db.prepare('PRAGMA table_info(users)').all().map((column) => column.name).join(', ');
+      db.exec(`INSERT INTO users_status_migration (${columns}) SELECT ${columns} FROM users`);
+      db.exec('DROP TABLE users');
+      db.exec('ALTER TABLE users_status_migration RENAME TO users');
+    })();
+  } finally {
+    db.exec('PRAGMA foreign_keys=ON');
+  }
+}
+migrateUserStatusCheck();
 
 ensureColumn('users', 'middle_name', 'TEXT');
 ensureColumn('users', 'department', 'TEXT');
@@ -659,6 +682,5 @@ try {
 } catch (err) {
   console.error('Failed to set mock user phones:', err);
 }
-
 
 

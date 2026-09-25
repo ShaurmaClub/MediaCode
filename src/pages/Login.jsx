@@ -32,7 +32,7 @@ export default function Login({ onLogin }) {
   const [actForm, setActForm] = useState({
     token: '', first_name: '', last_name: '', department: '', group_name: '', login: '', password: ''
   });
-  const [actConsent, setActConsent] = useState(false);
+  const [registrationConsent, setRegistrationConsent] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -51,10 +51,14 @@ export default function Login({ onLogin }) {
       setBusy(true);
       setError('');
       try {
-        const res = await fetch('/api/auth/first-login-check', {
+        if (!registrationConsent) {
+          setError('Требуется согласие на обработку персональных данных.');
+          return;
+        }
+        const res = await fetch('/api/auth/registration-start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: form.login })
+          body: JSON.stringify({ phone: form.login, privacy_consent: true })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -139,7 +143,7 @@ export default function Login({ onLogin }) {
       const res = await fetch('/api/auth/activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: activationPhone, ...actForm, consent_version: '2026-09-25', privacy_consent: actConsent })
+        body: JSON.stringify({ phone: activationPhone, ...actForm })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Ошибка активации');
@@ -258,20 +262,6 @@ export default function Login({ onLogin }) {
               </div>
             </div>
 
-            <div style={{ background: 'var(--surface)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '16px', marginTop: '16px' }}>
-              <label className="checkbox-label" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', margin: 0 }}>
-                <input
-                  type="checkbox"
-                  required
-                  checked={actConsent}
-                  onChange={e => setActConsent(e.target.checked)}
-                  style={{ marginTop: '2px' }}
-                />
-                <span style={{ fontSize: '12px', lineHeight: 1.4 }}>
-                  Я даю <a href="/privacy-policy" target="_blank" className="text-link" style={{ display: "inline" }} onClick={e => e.stopPropagation()}>согласие на обработку персональных данных</a>. Согласие требуется для работы кабинета.
-                </span>
-              </label>
-            </div>
             <button type="submit" className="btn primary" style={{ width: '100%', marginTop: '8px' }} disabled={busy}>
               {busy ? 'Активация...' : 'Активировать аккаунт'}
             </button>
@@ -367,21 +357,32 @@ export default function Login({ onLogin }) {
               )}
             </div>
 
+          {loginMode === 'activation' && (
+            <div className="form-group">
+              <label className="checkbox-label" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <input type="checkbox" required checked={registrationConsent} onChange={e => setRegistrationConsent(e.target.checked)} />
+                <span>Я даю согласие на обработку персональных данных</span>
+              </label>
+              <div style={{ fontSize: '12px', marginTop: '6px' }}>
+                <a href="/privacy-consent" target="_blank" rel="noreferrer" className="text-link">Согласие на обработку персональных данных</a><br />
+                <a href="https://st.educom.ru/eduoffices/gateways/get_file.php?id={C6751185-7D3C-F320-3D87-C704B3683104}&name=politika_v_otnoshenii_pd_rkait20.pdf" target="_blank" rel="noreferrer" className="text-link">Политика обработки персональных данных ГБПОУ КАИТ №20</a>
+              </div>
+            </div>
+          )}
+
           {loginMode !== 'activation' && (
             <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label htmlFor="password-input">Пароль</label>
-              <button
-                type="button"
+              <a
+                href="https://t.me/Vadim112005"
+                target="_blank"
+                rel="noreferrer"
                 className="text-link"
                 style={{ fontSize: '12px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                onClick={() => {
-                  setResetSuccess('');
-                  setShowResetModal(true);
-                }}
               >
-                Забыли пароль?
-              </button>
+                Проблемы со входом?
+              </a>
             </div>
 
             <input
@@ -428,10 +429,6 @@ export default function Login({ onLogin }) {
     </div>
   );
 }
-
-
-
-
 
 
 

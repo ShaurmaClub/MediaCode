@@ -1,12 +1,13 @@
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import db from './db.js';
 
-const args = process.argv.slice(2);
-const login = (args[0] || 'admin').trim().toLowerCase();
-const rawPassword = args[1] || ('MC_Adm_' + crypto.randomBytes(4).toString('hex') + '!');
-const firstName = args[2] || 'Главный';
-const lastName = args[3] || 'Администратор';
+const login = String(process.env.ADMIN_LOGIN || '').trim().toLowerCase();
+const rawPassword = String(process.env.ADMIN_PASSWORD || '');
+const firstName = String(process.env.ADMIN_FIRST_NAME || 'Главный');
+const lastName = String(process.env.ADMIN_LAST_NAME || 'Администратор');
+if (!login || !rawPassword) throw new Error('ADMIN_LOGIN and ADMIN_PASSWORD are required.');
+if (['admin', 'admin123', 'test', 'root'].includes(login) || rawPassword === 'Demo123!') throw new Error('Unsafe administrator credentials are not allowed.');
+if (rawPassword.length < 12) throw new Error('ADMIN_PASSWORD must be at least 12 characters.');
 
 const passwordHash = bcrypt.hashSync(rawPassword, 10);
 
@@ -24,10 +25,7 @@ if (existing) {
     INSERT INTO users (login, password_hash, role, first_name, last_name, email, status, must_change_password)
     VALUES (?, ?, 'ADMIN', ?, ?, ?, 'ACTIVE', 0)
   `).run(login, passwordHash, firstName, lastName, `${login}@college.local`);
-  console.log(`\n[МедиаКод] Администратор «${login}» успешно создан!`);
+  console.log(`\n[МедиаКод] Администратор «${login}» успешно создан.`);
 }
 
-console.log('------------------------------------------------------');
-console.log(`  Логин:   ${login}`);
-console.log(`  Пароль:  ${rawPassword}`);
-console.log('------------------------------------------------------\n');
+console.log(`Administrator login: ${login}`);

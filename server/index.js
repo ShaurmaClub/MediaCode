@@ -353,8 +353,12 @@ app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
     if (pendingUser) {
       return res.json({ requiresActivation: true, phone: normalizedPhone });
     }
+    const pendingApproval = db.prepare("SELECT id FROM users WHERE phone = ? AND status = 'PENDING_APPROVAL'").get(normalizedPhone);
+    if (pendingApproval) return res.status(403).json({ error: 'Регистрация отправлена на подтверждение администратору.', code: 'PENDING_APPROVAL' });
     user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'ACTIVE'").get(normalizedPhone);
   } else {
+    const pendingApproval = db.prepare("SELECT id FROM users WHERE login = ? AND status = 'PENDING_APPROVAL'").get(cleanLogin);
+    if (pendingApproval) return res.status(403).json({ error: 'Регистрация отправлена на подтверждение администратору.', code: 'PENDING_APPROVAL' });
     user = db.prepare("SELECT * FROM users WHERE login = ? AND status = 'ACTIVE'").get(cleanLogin);
   }
   
@@ -369,6 +373,15 @@ app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
     audit(user.id, 'LOGIN_SUCCESS', 'AUTH', user.id);
     res.json({ user: safeUser(user) });
   });
+});
+
+app.post('/api/auth/registration-start', authIpLimiter, authLimiter, (req, res) => {
+  const phone = normalizeRussianPhone(req.body?.phone);
+  if (!phone || req.body?.privacy_consent !== true) return res.status(400).json({ error: 'Требуется согласие на обработку персональных данных.' });
+  const user = db.prepare("SELECT id FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(phone);
+  if (!user) return res.status(400).json({ error: 'Регистрация для этого номера недоступна.' });
+  db.prepare("UPDATE users SET privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?, privacy_consent_source='registration_start' WHERE id=?").run(MEDIACODE_CONSENT_VERSION, user.id);
+  res.json({ ok: true, phone });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -2391,12 +2404,12 @@ app.post('/api/auth/first-login-check', authIpLimiter, authLimiter, (req, res) =
 });
 
 app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
-  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password, consent_version, privacy_consent } = req.body || {};
+  const { phone, token, first_name, last_name, middle_name, department, group_name, login, password } = req.body || {};
   const np = normalizeRussianPhone(phone);
-  if (!privacy_consent) return res.status(400).json({error: 'Требуется согласие на обработку персональных данных'});
   
   const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'PENDING_ACTIVATION'").get(np);
   if (!user) return res.status(400).json({error: 'Пользователь не найден или уже активирован'});
+  if (!user.privacy_consent_at || user.privacy_consent_source !== 'registration_start' || user.privacy_policy_version !== MEDIACODE_CONSENT_VERSION) return res.status(400).json({ error: 'Согласие на обработку персональных данных не подтверждено.' });
   
   if (user.activation_locked_until && new Date(user.activation_locked_until) > new Date()) {
     return res.status(429).json({ error: 'Too many activation attempts. Please wait 15 minutes.' });
@@ -2414,7 +2427,7 @@ app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
     return res.status(400).json({ error: 'Invalid or expired activation code' });
   }
 
-  if (!first_name || !last_name || !department || !group_name || !login || !password || !consent_version) {
+  if (!first_name || !last_name || !department || !group_name || !login || !password) {
     return res.status(400).json({error: 'Заполните все обязательные поля'});
   }
   
@@ -2443,12 +2456,38 @@ app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
   
   db.prepare(`
     UPDATE users 
-    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='ACTIVE', activation_token=NULL, activation_expires_at=NULL, activation_attempts=0, activation_locked_until=NULL, privacy_consent_at=CURRENT_TIMESTAMP, privacy_policy_version=?, privacy_consent_source='activation'
+    SET first_name=?, last_name=?, middle_name=?, department=?, group_name=?, login=?, password_hash=?, status='PENDING_APPROVAL', activation_token=NULL, activation_expires_at=NULL, activation_attempts=0, activation_locked_until=NULL
     WHERE id=?
-  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, MEDIACODE_CONSENT_VERSION, user.id);
+  `).run(normalizeName(first_name), normalizeName(last_name), normalizeName(middle_name || ''), department, group_name.trim(), cleanLogin, hash, user.id);
   
   audit(user.id, 'USER_ACTIVATED', 'AUTH', user.id);
-  res.json({ok: true, message: 'Аккаунт активирован. Вы можете войти.'});
+  res.json({ok: true, message: 'Регистрация отправлена на подтверждение администратору.'});
+});
+
+app.get('/api/admin/registrations/pending', strictAuth, role('ADMIN'), (req, res) => {
+  const registrations = db.prepare(`SELECT id, first_name, last_name, middle_name, phone, group_name, department, joined_at
+    FROM users WHERE status='PENDING_APPROVAL' ORDER BY joined_at ASC`).all();
+  res.json({ registrations });
+});
+
+app.post('/api/admin/registrations/:id/approve', strictAuth, role('ADMIN'), (req, res) => {
+  const result = db.prepare("UPDATE users SET status='ACTIVE' WHERE id=? AND status='PENDING_APPROVAL'").run(req.params.id);
+  if (!result.changes) return res.status(404).json({ error: 'Регистрация не найдена.' });
+  audit(req.user.id, 'REGISTRATION_APPROVED', 'USER', req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/registrations/:id/reject', strictAuth, role('ADMIN'), (req, res) => {
+  const result = db.prepare("UPDATE users SET status='REJECTED' WHERE id=? AND status='PENDING_APPROVAL'").run(req.params.id);
+  if (!result.changes) return res.status(404).json({ error: 'Регистрация не найдена.' });
+  audit(req.user.id, 'REGISTRATION_REJECTED', 'USER', req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/registrations/approve-all', strictAuth, role('ADMIN'), (req, res) => {
+  const result = db.transaction(() => db.prepare("UPDATE users SET status='ACTIVE' WHERE status='PENDING_APPROVAL'").run())();
+  audit(req.user.id, 'REGISTRATIONS_APPROVED_ALL', 'USER', null, { count: result.changes });
+  res.json({ ok: true, count: result.changes });
 });
 
 // Update user (Admin only)
@@ -2647,5 +2686,3 @@ export const server = app.listen(PORT, () => {
 });
 
 export default app;
-
-

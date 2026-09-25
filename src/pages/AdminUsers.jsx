@@ -36,6 +36,7 @@ export default function AdminUsers({ currentUser }) {
   const [showPwd2, setShowPwd2] = useState(false);
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [registrations, setRegistrations] = useState([]);
   const toast = useToast();
 
   // Modals
@@ -101,9 +102,39 @@ export default function AdminUsers({ currentUser }) {
     }
   };
 
+  const loadRegistrations = async () => {
+    try {
+      const res = await api('/admin/registrations/pending');
+      setRegistrations(res.registrations || []);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const reviewRegistration = async (id, action) => {
+    try {
+      await api(`/admin/registrations/${id}/${action}`, { method: 'POST' });
+      await Promise.all([loadRegistrations(), loadUsers()]);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const approveAllRegistrations = async () => {
+    if (!window.confirm('Подтвердить все ожидающие регистрации?')) return;
+    try {
+      await api('/admin/registrations/approve-all', { method: 'POST' });
+      await Promise.all([loadRegistrations(), loadUsers()]);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   useEffect(() => {
     loadUsers();
   }, [roleFilter, statusFilter]);
+
+  useEffect(() => { loadRegistrations(); }, []);
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
@@ -227,6 +258,18 @@ export default function AdminUsers({ currentUser }) {
         </div>
       }
     >
+      <div className="panel" style={{ marginBottom: '16px' }}>
+        <div className="section-head">
+          <div><h2>Регистрации на подтверждение</h2><span className="muted">{registrations.length}</span></div>
+          <button className="btn primary" disabled={!registrations.length} onClick={approveAllRegistrations}>Подтвердить все регистрации</button>
+        </div>
+        {registrations.map((registration) => (
+          <div key={registration.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+            <span>{registration.last_name} {registration.first_name} · {registration.phone} · {registration.group_name || '—'} · {registration.department || '—'} · {registration.joined_at}</span>
+            <span style={{ display: 'flex', gap: '8px' }}><button className="btn tiny success-ghost" onClick={() => reviewRegistration(registration.id, 'approve')}>Подтвердить</button><button className="btn tiny danger-ghost" onClick={() => reviewRegistration(registration.id, 'reject')}>Отклонить</button></span>
+          </div>
+        ))}
+      </div>
       {/* Search & Filter Toolbar */}
       <div className="toolbar">
         <form

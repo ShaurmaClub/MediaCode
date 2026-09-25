@@ -74,7 +74,7 @@ function App() {
 
   const location = useLocation();
 
-  if (location.pathname === '/privacy-policy') {
+  if (location.pathname === '/privacy-policy' || location.pathname === '/privacy-consent') {
     return <PrivacyPolicy />;
   }
 
@@ -95,6 +95,7 @@ function App() {
         <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
         <Route path="/join" element={<PublicRecruitment />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/privacy-consent" element={<PrivacyPolicy />} />
         <Route
           path="*"
           element={isRecruitmentSubdomain() ? <PublicRecruitment /> : <Login onLogin={setUser} />}
@@ -137,6 +138,7 @@ function App() {
         <Route path="/join/:trackSlug" element={<PublicRecruitment />} />
         <Route path="/join" element={<PublicRecruitment />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/privacy-consent" element={<PrivacyPolicy />} />
 
         {/* Recruitment Applications Review (Staff & Admin) */}
         <Route
@@ -192,5 +194,4 @@ createRoot(rootElement).render(
     </ToastProvider>
   </BrowserRouter>
 );
-
 

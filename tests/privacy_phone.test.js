@@ -128,7 +128,7 @@ describe('Privacy and Phone Logic Tests', () => {
     const staffApp = await apiCall('GET', `/recruitment/applications/${appId}`, null, staffLogin.cookie);
     assert.equal(staffApp.status, 200);
      // old API set '1.0', we set 'draft-2026-09'. Wait, we patched it to 'draft-2026-09'! Let's check!
-    assert.equal(staffApp.data.application.consent_version, 'draft-2026-09');
+    assert.equal(staffApp.data.application.consent_version, '2026-09-25');
 
     // Student cannot see
     const stuLogin = await apiCall('POST', '/auth/login', { login: 'student', password: 'Demo123!' });
