@@ -211,10 +211,7 @@ export default function Login({ onLogin }) {
 
             
 
-            <div className="form-group">
-              <label>Код активации <span className="required">*</span></label>
-              <input type="text" required value={actForm.token} onChange={e => setActForm({...actForm, token: e.target.value})} autoComplete="one-time-code" />
-            </div>
+            
 
             <div style={{ display: 'flex', gap: '12px' }}>
               <div className="form-group" style={{ flex: 1 }}>

@@ -2374,17 +2374,13 @@ app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
     const exist = db.prepare('SELECT id FROM users WHERE phone = ?').get(np);
     if (exist) { errors.push({ phone: np, error: 'Уже существует' }); continue; }
     
-    const rawToken = crypto.randomBytes(3).toString('hex').toUpperCase();
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const tempLogin = 'pending_' + Date.now() + '_' + Math.floor(Math.random()*10000);
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      
+    const tempLogin = 'pending_' + Date.now() + '_' + Math.floor(Math.random()*10000);
       db.prepare(`
-        INSERT INTO users (login, password_hash, role, phone, status, activation_token, activation_expires_at, must_change_password)
-        VALUES (?, '', 'STUDENT', ?, 'PENDING_ACTIVATION', ?, ?, 0)
-      `).run(tempLogin, np, tokenHash, expiresAt);
+        INSERT INTO users (login, password_hash, role, phone, status, must_change_password)
+        VALUES (?, '', 'STUDENT', ?, 'PENDING_ACTIVATION', 0)
+      `).run(tempLogin, np);
       
-      added.push({ phone: np, token: rawToken });
+      added.push({ phone: np });
   }
 
   res.json({ added, errors });
@@ -2442,6 +2438,7 @@ app.post('/api/auth/activate', authIpLimiter, authLimiter, (req, res) => {
   if (user) {
     if (user.status === 'ACTIVE') return res.status(400).json({error: 'Аккаунт уже активирован'});
     if (user.status === 'DISABLED') return res.status(400).json({error: 'Аккаунт заблокирован'});
+    if (user.status === 'PENDING_APPROVAL') return res.status(400).json({error: 'Регистрация отправлена на подтверждение администратору.'});
     
     // existing user (PENDING_ACTIVATION or PENDING_APPROVAL) becomes ACTIVE
     db.prepare(`
