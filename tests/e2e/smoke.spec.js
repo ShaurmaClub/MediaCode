@@ -27,7 +27,7 @@ test.describe('Smoke tests', () => {
     
     await page.click('a[href="/tasks"]');
     await page.waitForURL('/tasks');
-    await expect(page.locator('text=Мероприятия')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=Мероприятия').first()).toBeVisible({ timeout: 5000 });
 
     // Go to first task
     const taskLink = page.locator('.task-card a').first();
@@ -137,7 +137,7 @@ test.describe('Smoke tests', () => {
     await expect(page1.locator('text=Твой баланс в системе')).toBeVisible({ timeout: 5000 });
 
     await page2.goto('/tasks');
-    await expect(page2.locator('text=Мероприятия')).toBeVisible();
+    await expect(page2.locator('text=Мероприятия').first()).toBeVisible();
 
     // logout in page1
     await page1.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
