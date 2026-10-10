@@ -1,27 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { api } from './api.js';
 import { ToastProvider } from './context/ToastContext.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import Shell from './components/Shell.jsx';
+import { Loader } from './components/UI.jsx';
 import Login from './pages/Login.jsx';
 import FirstLogin from './pages/FirstLogin.jsx';
 import PrivacyConsent from './pages/PrivacyConsent.jsx';
 import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Tasks from './pages/Tasks.jsx';
-import TaskDetail from './pages/TaskDetail.jsx';
-import TaskForm from './pages/TaskForm.jsx';
-import Students from './pages/Students.jsx';
-import RecordBook from './pages/RecordBook.jsx';
-import Leaderboard from './pages/Leaderboard.jsx';
-import Notifications from './pages/Notifications.jsx';
-import AdminUsers from './pages/AdminUsers.jsx';
-import AdminAudit from './pages/AdminAudit.jsx';
-import SettingsPage from './pages/SettingsPage.jsx';
 import PublicRecruitment from './pages/PublicRecruitment.jsx';
-import RecruitmentReview from './pages/RecruitmentReview.jsx';
+
+// Lazy-loaded pages for code-splitting
+const TaskDetail = lazy(() => import('./pages/TaskDetail.jsx'));
+const TaskForm = lazy(() => import('./pages/TaskForm.jsx'));
+const Students = lazy(() => import('./pages/Students.jsx'));
+const RecordBook = lazy(() => import('./pages/RecordBook.jsx'));
+const Leaderboard = lazy(() => import('./pages/Leaderboard.jsx'));
+const Notifications = lazy(() => import('./pages/Notifications.jsx'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers.jsx'));
+const AdminAudit = lazy(() => import('./pages/AdminAudit.jsx'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const RecruitmentReview = lazy(() => import('./pages/RecruitmentReview.jsx'));
 import './styles.css';
 
 function isRecruitmentSubdomain() {
@@ -130,7 +133,8 @@ function App() {
 
   return (
     <Shell user={user} setUser={setUser} theme={theme} setTheme={setTheme}>
-      <Routes>
+      <Suspense fallback={<Loader text="Загрузка страницы…" />}>
+        <Routes>
         <Route path="/" element={<Dashboard user={user} />} />
         <Route path="/dashboard" element={<Dashboard user={user} />} />
 
@@ -182,7 +186,8 @@ function App() {
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </Shell>
+    </Suspense>
+  </Shell>
   );
 }
 
