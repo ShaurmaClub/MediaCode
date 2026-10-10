@@ -151,9 +151,6 @@ app.patch('/api/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res
   if (!appRecord) return res.status(404).json({ error: 'Заявка не найдена' });
 
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(appRecord.task_id);
-  if (req.user.role !== 'ADMIN' && task.creator_id !== req.user.id) {
-    return res.status(403).json({ error: 'Управлять участниками может только автор мероприятия или администратор' });
-  }
   const transitions = {
     APPLIED: ['SELECTED', 'REJECTED'], SELECTED: ['IN_PROGRESS', 'REJECTED', 'NO_SHOW'],
     IN_PROGRESS: ['NO_SHOW'], COMPLETION_SUBMITTED: ['IN_PROGRESS', 'NO_SHOW'],
@@ -206,9 +203,6 @@ app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, re
   const taskId = req.params.id;
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   if (!task) return res.status(404).json({ error: 'Мероприятие не найдено' });
-  if (req.user.role !== 'ADMIN' && task.creator_id !== req.user.id) {
-    return res.status(403).json({ error: 'Подтверждать выполнение может только автор мероприятия или администратор' });
-  }
   if (['DRAFT', 'CANCELLED', 'ARCHIVED'].includes(task.status)) return res.status(400).json({ error: 'Мероприятие закрыто для подтверждения' });
   const targetUserId = req.body?.user_id;
   if (!targetUserId) return res.status(400).json({ error: 'Укажите ID студента' });

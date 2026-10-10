@@ -25,13 +25,13 @@ function task(owner, status = 'OPEN', deadline = null) {
 }
 const userId = name => db.prepare('SELECT id FROM users WHERE login=?').get(name).id;
 
-test('Staff cannot edit or delete another creator’s task or manage their applicants', async () => {
+test('Staff can collaborate: edit tasks and manage applicants created by other staff or admin', async () => {
   const id = task(userId('admin'));
   const application = Number(db.prepare("INSERT INTO applications(task_id,user_id,status) VALUES(?,?,'APPLIED')").run(id,userId('student')).lastInsertRowid);
-  assert.equal((await request(staff, `/tasks/${id}`, 'PATCH', {title:'Changed'})).status,403);
-  assert.equal((await request(staff, `/tasks/${id}`, 'DELETE')).status,403);
-  assert.equal((await request(staff, `/applications/${application}`, 'PATCH', {status:'SELECTED'})).status,403);
-  assert.equal((await request(staff, `/tasks/${id}/complete`, 'POST', {user_id:userId('student')})).status,403);
+  assert.equal((await request(staff, `/tasks/${id}`, 'PATCH', {title:'Changed'})).status,200);
+  assert.equal((await request(staff, `/applications/${application}`, 'PATCH', {status:'SELECTED'})).status,200);
+  assert.equal((await request(staff, `/tasks/${id}/complete`, 'POST', {user_id:userId('student')})).status,200);
+  assert.equal((await request(staff, `/tasks/${id}`, 'DELETE')).status,200);
 });
 test('Capacity and completion workflow cannot be bypassed through status PATCH', async () => {
   const id = task(userId('staff'));

@@ -212,7 +212,7 @@ export default function TaskDetail({ user }) {
   if (loading || !task) return <Loader text="Загружаем задание…" />;
 
   const isStaffOrAdmin = user.role !== 'STUDENT';
-  const canManage = user.role === 'ADMIN' || (user.role === 'STAFF' && task.creator_id === user.id);
+  const canManage = isStaffOrAdmin;
   const myApp = task.my_application;
 
   return (
