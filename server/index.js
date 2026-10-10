@@ -52,6 +52,9 @@ app.use((req, res, next) => {
 
 // Global Error Handler
 app.use((err, req, res, next) => {
+  // Некорректный JSON/слишком большое тело — ошибка клиента, а не сервера
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Некорректный формат запроса' });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Слишком большой запрос' });
   console.error('Server error:', err);
   res.status(500).json({ error: 'Внутренняя ошибка сервера', details: isProduction ? undefined : err.message });
 });
