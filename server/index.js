@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import db, { seed, DEPARTMENTS } from './db.js';
+import { startAutoBackup } from './backup.js';
 import storageService, { uploadMiddleware } from './storage.js';
 import { validateMaxInitData, sendMaxNotification, getMaxConfig } from './max.js';
 import { MAX_POINTS_PER_TRANSACTION, EVENT_CATEGORIES } from './config/eventCategories.js';
@@ -332,7 +333,14 @@ export function transliterateToLogin(fullName) {
 // ==========================================
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
+  // Реальная проверка БД: при недоступной базе отвечаем 503, чтобы мониторинг/прокси это заметили
+  try {
+    db.prepare('SELECT 1').get();
+    res.json({ ok: true, db: 'ok', uptime: Math.round(process.uptime()), timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('Health check failed:', err.message);
+    res.status(503).json({ ok: false, db: 'error', timestamp: new Date().toISOString() });
+  }
 });
 
 app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
@@ -2659,10 +2667,17 @@ app.get('/api/tasks/files/download', strictAuth, (req, res) => {
 });
 
 const distPath = path.join(__dirname, '../dist');
-app.use(express.static(distPath));
+// Хешированные ассеты кэшируем надолго, index.html — никогда (иначе после деплоя пользователи видят старую версию)
+app.use('/assets', express.static(path.join(distPath, 'assets'), { maxAge: '1y', immutable: true }));
+app.use(express.static(distPath, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
+  }
+}));
 
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api')) {
+    res.setHeader('Cache-Control', 'no-cache');
     return res.sendFile(path.join(distPath, 'index.html'));
   }
   if (req.path.startsWith('/api')) {
@@ -2680,6 +2695,36 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 4000;
 export const server = app.listen(PORT, () => {
   console.log(`Media Center backend is running on http://localhost:${PORT}`);
+});
+
+startAutoBackup(db);
+
+// Корректное завершение: дожидаемся запросов, сбрасываем WAL в основной файл БД и закрываем её
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} получен, завершаем работу...`);
+  const forceExit = setTimeout(() => process.exit(1), 10_000);
+  forceExit.unref();
+  server.close(() => {
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+      db.close();
+    } catch (err) {
+      console.error('Ошибка при закрытии БД:', err.message);
+    }
+    process.exit(0);
+  });
+}
+if (process.env.NODE_ENV !== 'test') {
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  gracefulShutdown('uncaughtException');
 });
 
 export default app;
