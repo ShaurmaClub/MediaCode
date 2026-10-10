@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  Shield,
-  Plus,
   Edit,
   Key,
   CheckCircle,
@@ -9,7 +7,6 @@ import {
   Search,
   Filter,
   UserPlus,
-  Lock,
   Copy,
   Check,
   Sparkles
@@ -32,9 +29,7 @@ export default function AdminUsers({ currentUser }) {
   const [massCreateModalOpen, setMassCreateModalOpen] = useState(false);
   const [massPhones, setMassPhones] = useState('');
   const [massResult, setMassResult] = useState(null);
-  const [showPwd1, setShowPwd1] = useState(false);
-  const [showPwd2, setShowPwd2] = useState(false);
-  const [roleFilter, setRoleFilter] = useState('ALL');
+      const [roleFilter, setRoleFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [registrations, setRegistrations] = useState([]);
   const toast = useToast();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 const SKILL_MAP = {
@@ -19,17 +19,12 @@ function tSkill(s) {
 import {
   CheckCircle,
   Search,
-  Award,
   BookOpen,
-  Calendar,
   PlusCircle,
   Phone,
-  MessageSquare,
-  Mail,
   UserCheck,
   Trophy,
   Medal,
-  Clock,
   ArrowUpRight
 } from 'lucide-react';
 import { api, formatDate, relativeTime, formatDateTime } from '../api.js';

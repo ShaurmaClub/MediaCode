@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Save, CalendarDays, PlusCircle, Trash2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, PlusCircle, Trash2 } from 'lucide-react';
 import { api } from '../api.js';
 import { Page, Loader } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -69,7 +69,7 @@ export default function TaskForm({ user }) {
           if (data.roles_needed) {
             try {
               parsedRoles = typeof data.roles_needed === 'string' ? JSON.parse(data.roles_needed) : data.roles_needed;
-            } catch (e) {
+            } catch {
               parsedRoles = [];
             }
           }

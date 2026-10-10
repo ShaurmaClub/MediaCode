@@ -1,9 +1,8 @@
 import app from '../app.js';
-import session from 'express-session';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { validateMaxInitData, getMaxConfig } from '../max.js';
-import { authIpLimiter, authLimiter, auth, role, safeUser, audit, createNotification, normalizeRussianPhone, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
+import { authIpLimiter, authLimiter, auth, safeUser, audit, createNotification, normalizeRussianPhone, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
 
 // ==========================================
 // AUTH ROUTES

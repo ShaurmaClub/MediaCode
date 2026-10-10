@@ -1,7 +1,7 @@
 import app from '../app.js';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
-import { authIpLimiter, authLimiter, auth, strictAuth, role, safeStudentView, safeUser, audit, generateTemporaryPassword, normalizeRussianPhone, normalizeName, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
+import { authIpLimiter, authLimiter, strictAuth, role, safeStudentView, safeUser, audit, generateTemporaryPassword, normalizeRussianPhone, normalizeName, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
 
 // ==========================================
 // USERS & VOLUNTEERS DIRECTORY
@@ -386,6 +386,8 @@ app.post('/api/users/:id/reset-password', strictAuth, role('ADMIN'), authLimiter
 
   const newHash = bcrypt.hashSync(finalPassword, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(newHash, targetId);
+  // An old authenticated session must not be able to choose the replacement password.
+  db.prepare("DELETE FROM sessions WHERE json_extract(data, '$.user.id') = ?").run(Number(targetId));
 
   audit(req.user.id, 'PASSWORD_RESET_BY_ADMIN', 'USER', targetId, { login: existing.login });
   res.json({

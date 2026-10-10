@@ -1,9 +1,8 @@
 import app from '../app.js';
 import fs from 'fs';
-import path from 'path';
 import db, { DEPARTMENTS } from '../db.js';
 import storageService, { uploadMiddleware } from '../storage.js';
-import { recruitmentApplyLimiter, role, audit, createNotification, normalizeRussianPhone, isValidYandexDiskLink, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
+import { recruitmentApplyLimiter, audit, createNotification, normalizeRussianPhone, isValidYandexDiskLink, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
 
 // ==========================================
 // PUBLIC RECRUITMENT PORTAL ROUTES

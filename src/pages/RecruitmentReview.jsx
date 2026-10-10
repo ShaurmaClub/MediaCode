@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import {
-  Inbox,
   Filter,
   Search,
   CheckCircle,
@@ -10,11 +8,9 @@ import {
   Download,
   ExternalLink,
   UserCheck,
-  UserPlus,
   Phone,
   MessageSquare,
   FileText,
-  AlertCircle,
   Eye,
   Camera,
   Video,
@@ -23,8 +19,8 @@ import {
   Film,
   Mic
 } from 'lucide-react';
-import { api, formatDateTime, formatDate, relativeTime } from '../api.js';
-import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
+import { api, formatDateTime, relativeTime } from '../api.js';
+import { Page, Loader, Empty } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 
@@ -625,26 +621,20 @@ export default function RecruitmentReview({ currentUser }) {
                   </button>
                 )}
 
-                {user?.role === 'ADMIN' && (
+                {currentUser?.role === 'ADMIN' && (
                   <button
                     type="button"
                     className="btn outline"
                     disabled={busyAction}
                     onClick={async () => {
                       try {
-                        const res = await fetch(`/api/recruitment/applications/${appDetails.application.id}/allow-resubmission`, {
-                          method: 'POST',
-                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        const data = await api(`/recruitment/applications/${appDetails.application.id}/allow-resubmission`, {
+                          method: 'POST'
                         });
-                        const data = await res.json();
-                        if (res.ok) {
-                          toast.success(data.message);
-                          fetchApplicationDetails(appDetails.application.id);
-                        } else {
-                          toast.error(data.error);
-                        }
+                        toast.success(data?.message || 'Повторная подача разрешена');
+                        handleOpenDetail({ id: appDetails.application.id });
                       } catch (err) {
-                        toast.error('Ошибка сети');
+                        toast.error(err.message || 'Ошибка сети');
                       }
                     }}
                   >

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Trophy, Award, Medal, Users, ArrowUpRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Trophy, Medal } from 'lucide-react';
 import { api } from '../api.js';
-import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
+import { Page, Loader, Avatar } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 
 
@@ -33,8 +33,7 @@ export default function Leaderboard({ user }) {
   if (loading) return <Loader text="Загружаем рейтинг медиаволонтёров…" />;
 
   const top3 = rows.slice(0, 3);
-  const rest = rows.slice(3);
-
+  
   return (
     <Page
       title="Рейтинг медиаволонтёров"

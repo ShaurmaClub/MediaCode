@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Filter, CalendarDays, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, Filter } from 'lucide-react';
 import { api } from '../api.js';
 import { Page, Loader, Empty, TaskCard } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -16,7 +16,7 @@ const STATUS_TABS = [
 ];
 
 export default function Tasks({ user }) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
 
   const [tasks, setTasks] = useState([]);

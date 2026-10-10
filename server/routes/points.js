@@ -11,10 +11,10 @@ import { strictAuth, role, safeStudentView, safeUser, audit, createNotification 
 app.post('/api/points/award', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const { user_id, amount, reason, category, task_id } = req.body || {};
   if (!user_id) return res.status(400).json({ error: 'Укажите студента' });
-  if (!reason || !reason.trim()) return res.status(400).json({ error: 'Укажите причину начисления' });
+  if (typeof reason !== 'string' || !reason.trim()) return res.status(400).json({ error: 'Укажите причину начисления' });
 
-  const numAmount = parseInt(amount, 10);
-  if (isNaN(numAmount) || numAmount <= 0) {
+  const numAmount = Number(amount);
+  if (!Number.isSafeInteger(numAmount) || numAmount <= 0) {
     return res.status(400).json({ error: 'Сумма баллов должна быть больше 0' });
   }
   if (numAmount > MAX_POINTS_PER_TRANSACTION) {
@@ -23,8 +23,15 @@ app.post('/api/points/award', strictAuth, role('STAFF', 'ADMIN'), (req, res) => 
 
   const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user_id);
   if (!targetUser) return res.status(404).json({ error: 'Пользователь не найден' });
+  if (targetUser.role !== 'STUDENT') return res.status(400).json({ error: 'Баллы начисляются только студентам' });
 
   const cat = category || 'BONUS';
+  if (typeof cat !== 'string' || ['COMPLETION', 'CORRECTION'].includes(cat)) {
+    return res.status(400).json({ error: 'Используйте подтверждение выполнения или отмену начисления для этой категории' });
+  }
+  if (task_id && !db.prepare('SELECT id FROM tasks WHERE id = ?').get(task_id)) {
+    return res.status(400).json({ error: 'Мероприятие не найдено' });
+  }
   const r = db.prepare(`
     INSERT INTO points (user_id, amount, reason, category, task_id, issued_by)
     VALUES (?, ?, ?, ?, ?, ?)

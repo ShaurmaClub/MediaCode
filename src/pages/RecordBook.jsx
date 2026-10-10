@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Award, BookOpen, Filter, Search, CheckCircle2, Calendar, AlertTriangle } from 'lucide-react';
+import { Filter, Search, AlertTriangle } from 'lucide-react';
 import { api } from '../api.js';
 import { Page, Loader, Empty, PointRow } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
@@ -32,8 +32,7 @@ export default function RecordBook({ user }) {
   const [reversalReason, setReversalReason] = useState('');
   const [busyReverse, setBusyReverse] = useState(false);
 
-  const isStaffOrAdmin = user?.role === 'STAFF' || user?.role === 'ADMIN';
-
+  
   const loadRecordBook = async () => {
     try {
       setLoading(true);

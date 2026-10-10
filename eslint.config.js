@@ -31,7 +31,7 @@ export default [
       'no-prototype-builtins': 'off',
       'no-useless-escape': 'off',
       'no-dupe-keys': 'warn',
-      'no-undef': 'warn'
+      'no-undef': 'error'
     }
   }
 ];

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Palette, CheckCircle2, User, Lock, Save, Sparkles, MessageCircle, Eye, EyeOff } from 'lucide-react';
+import { useState } from 'react';
+import { Palette, CheckCircle2, User, Lock, Save, Eye, EyeOff } from 'lucide-react';
 import { api, THEMES } from '../api.js';
 import { Page } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';

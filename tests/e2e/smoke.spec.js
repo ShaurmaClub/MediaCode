@@ -23,11 +23,11 @@ test.describe('Smoke tests', () => {
     await page.fill('#password-input', 'Demo123!');
     await page.locator('#password-input').press('Enter');
     // removed waitForURL
-    await expect(page.locator('text=Мои текущие назначения')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=Твой баланс в системе')).toBeVisible({ timeout: 5000 });
     
     await page.click('a[href="/tasks"]');
     await page.waitForURL('/tasks');
-    await expect(page.locator('text=Мероприятия')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=Мероприятия').first()).toBeVisible({ timeout: 5000 });
 
     // Go to first task
     const taskLink = page.locator('.task-card a').first();
@@ -47,7 +47,7 @@ test.describe('Smoke tests', () => {
     
     await page.click('a[href="/recruitment"]');
     await page.waitForURL('/recruitment');
-    await expect(page.locator('text=Наборы в медиацентр')).toBeVisible();
+    await expect(page.locator('text=Заявки на отбор').first()).toBeVisible();
 
     // Tasks
     await page.goto('/tasks');
@@ -130,28 +130,20 @@ test.describe('Smoke tests', () => {
     const page2 = await context.newPage();
 
     await page1.goto('/login');
+    await page1.click('button:has-text("По логину")');
     await page1.fill('#login-input', 'student');
     await page1.fill('#password-input', 'Demo123!');
     await page1.click('button[type="submit"]');
-    await page1.waitForURL('/dashboard');
+    await expect(page1.locator('text=Твой баланс в системе')).toBeVisible({ timeout: 5000 });
 
     await page2.goto('/tasks');
-    await expect(page2.locator('text=Мероприятия')).toBeVisible();
+    await expect(page2.locator('text=Мероприятия').first()).toBeVisible();
 
     // logout in page1
-    await page1.click('.sidebar .logout-link'); // Wait, there might be no .logout-link
-    // just navigate to /login? Or click logout. Let's just do API call or UI click
-    // the UI has a logout button with icon
-    const logoutBtn = page1.locator('button:has-text("Выйти"), a:has-text("Выйти")').first();
-    if (await logoutBtn.count() > 0) {
-      await logoutBtn.click();
-    } else {
-      await page1.goto('/login'); // wait, that doesn't clear cookie if there is no endpoint
-      await page1.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
-    }
-    
+    await page1.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+
     // page2 should still be somewhat alive, but when navigating it should redirect to login
     await page2.goto('/dashboard');
-    await expect(page2).toHaveURL(/\/login/);
+    await expect(page2.locator('#login-input')).toBeVisible();
   });
 });

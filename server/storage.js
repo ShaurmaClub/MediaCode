@@ -70,7 +70,8 @@ export const storageService = {
   getSafeFilePath(storedName) {
     const safePath = path.resolve(uploadDir, storedName);
     // Path traversal check
-    if (!safePath.startsWith(path.resolve(uploadDir))) {
+    const relative = path.relative(path.resolve(uploadDir), safePath);
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
       throw new Error('Недопустимый путь к файлу');
     }
     return safePath;

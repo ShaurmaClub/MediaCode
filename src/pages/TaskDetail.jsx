@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
@@ -12,11 +12,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  ExternalLink,
-  ShieldCheck,
   FileText
 } from 'lucide-react';
-import { api, formatDate, formatDateTime, relativeTime } from '../api.js';
+import { api, formatDate, formatDateTime } from '../api.js';
 import { Page, Loader, Empty, StatusBadge, PriorityBadge, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -58,7 +56,7 @@ export default function TaskDetail({ user }) {
   const [completionReason, setCompletionReason] = useState('');
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
 
-  const parsedRoles = React.useMemo(() => {
+  const parsedRoles = useMemo(() => {
     if (!task?.roles_needed) return [];
     try {
       const parsed = typeof task.roles_needed === 'string' ? JSON.parse(task.roles_needed) : task.roles_needed;
@@ -214,6 +212,7 @@ export default function TaskDetail({ user }) {
   if (loading || !task) return <Loader text="Загружаем задание…" />;
 
   const isStaffOrAdmin = user.role !== 'STUDENT';
+  const canManage = isStaffOrAdmin;
   const myApp = task.my_application;
 
   return (
@@ -225,7 +224,7 @@ export default function TaskDetail({ user }) {
           <Link to="/tasks" className="btn ghost">
             <ArrowLeft size={16} /> К списку мероприятий
           </Link>
-          {isStaffOrAdmin && (
+          {canManage && (
             <>
               <Link to={`/tasks/${id}/edit`} className="btn ghost">
                 <Edit size={16} /> Редактировать
@@ -701,7 +700,7 @@ export default function TaskDetail({ user }) {
                       )}
 
                       {/* Actions for Staff */}
-                      <div className="applicant-actions">
+                      <div className="applicant-actions" style={!canManage ? { display: 'none' } : undefined}>
                         {app.status === 'APPLIED' && (
                           <>
                             <button

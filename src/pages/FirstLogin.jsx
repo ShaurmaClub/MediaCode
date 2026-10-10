@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api.js';
 import { useToast } from '../context/ToastContext.jsx';
-import { KeyRound, User, Lock, AlertCircle, CheckCircle2, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { User, Lock, AlertCircle, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 export default function FirstLogin({ user, onPasswordChanged, onLogout }) {
   const [login, setLogin] = useState(user.login || '');

@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../context/ToastContext.jsx';
-import { Sparkles, ArrowRight, Shield, Camera, KeyRound, HelpCircle, X, Check, Eye, EyeOff } from 'lucide-react';
+import { Sparkles, ArrowRight, Shield, Camera, Eye, EyeOff } from 'lucide-react';
 import Modal from '../components/Modal.jsx';
 
 const formatPhone = (val) => {
@@ -26,8 +26,7 @@ export default function Login({ onLogin }) {
   const [form, setForm] = useState({ login: '', password: '' });
   const [activationMode, setActivationMode] = useState(false);
   const [loginMode, setLoginMode] = useState('phone'); // 'phone' or 'login'
-  const [showPassword, setShowPassword] = useState(false);
-  const [showActPassword, setShowActPassword] = useState(false);
+    const [showActPassword, setShowActPassword] = useState(false);
   const [activationPhone, setActivationPhone] = useState('');
   const [actForm, setActForm] = useState({
     token: '', first_name: '', last_name: '', department: '', group_name: '', login: '', password: ''
@@ -36,10 +35,7 @@ export default function Login({ onLogin }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
-  const [resetContact, setResetContact] = useState('');
-  const [resetBusy, setResetBusy] = useState(false);
-  const [resetSuccess, setResetSuccess] = useState('');
-  const toast = useToast();
+        const toast = useToast();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -74,7 +70,7 @@ export default function Login({ onLogin }) {
           setActForm({ ...actForm, first_name: data.user.first_name || '', last_name: data.user.last_name || '', group_name: data.user.group_name || '' });
         }
         setActivationMode(true);
-      } catch (err) {
+      } catch {
         setError('Сбой сети. Попробуйте еще раз.');
       } finally {
         setBusy(false);
@@ -113,28 +109,7 @@ export default function Login({ onLogin }) {
     }
   };
 
-  const handleRequestReset = async (e) => {
-    e.preventDefault();
-    if (!resetContact.trim()) {
-      toast.error('Укажите ваш логин или телефон');
-      return;
-    }
-
-    setResetBusy(true);
-    try {
-      const res = await api('/auth/request-password-reset', {
-        method: 'POST',
-        body: JSON.stringify({ loginOrContact: resetContact.trim() })
-      });
-      setResetSuccess(res.message);
-      toast.success('Запрос на сброс пароля отправлен');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setResetBusy(false);
-    }
-  };
-
+  
   const handleActivate = async (e) => {
     e.preventDefault();
     setBusy(true);

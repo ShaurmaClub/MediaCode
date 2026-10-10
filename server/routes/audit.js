@@ -1,6 +1,6 @@
 import app from '../app.js';
 import db from '../db.js';
-import { strictAuth, role, audit, getHumanReadableAudit } from '../lib/shared.js';
+import { strictAuth, role, getHumanReadableAudit } from '../lib/shared.js';
 
 // ==========================================
 // AUDIT LOGS
