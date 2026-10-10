@@ -27,6 +27,36 @@ const ACTIONS = [
 
 const ENTITIES = ['ALL', 'AUTH', 'TASK', 'APPLICATION', 'POINT', 'USER'];
 
+const ACTION_LABELS = {
+  ALL: 'Все действия',
+  LOGIN_SUCCESS: 'Успешный вход',
+  LOGIN_FAILED: 'Неудачная попытка входа',
+  LOGOUT: 'Выход из аккаунта',
+  TASK_CREATED: 'Задание создано',
+  TASK_UPDATED: 'Задание изменено',
+  TASK_DELETED: 'Задание удалено',
+  TASK_ARCHIVED: 'Задание в архиве',
+  APPLICATION_CREATED: 'Заявка подана',
+  APPLICATION_WITHDRAWN: 'Заявка отозвана',
+  APPLICATION_STATUS_CHANGED: 'Статус заявки изменён',
+  COMPLETION_SUBMITTED: 'Работа сдана',
+  COMPLETION_CONFIRMED: 'Работа подтверждена',
+  POINTS_MANUALLY_ISSUED: 'Баллы начислены вручную',
+  USER_CREATED: 'Пользователь создан',
+  USER_UPDATED: 'Пользователь изменён',
+  PASSWORD_RESET_BY_ADMIN: 'Пароль сброшен администратором',
+  PASSWORD_CHANGED: 'Пароль изменён'
+};
+
+const ENTITY_LABELS = {
+  ALL: 'Все сущности',
+  AUTH: 'Вход и выход',
+  TASK: 'Задания',
+  APPLICATION: 'Заявки',
+  POINT: 'Баллы',
+  USER: 'Пользователи'
+};
+
 export default function AdminAudit() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -81,7 +111,7 @@ export default function AdminAudit() {
             >
               {ACTIONS.map((act) => (
                 <option key={act} value={act}>
-                  {act === 'ALL' ? 'Все действия' : act}
+                  {ACTION_LABELS[act] || act}
                 </option>
               ))}
             </select>
@@ -94,7 +124,7 @@ export default function AdminAudit() {
             >
               {ENTITIES.map((ent) => (
                 <option key={ent} value={ent}>
-                  {ent === 'ALL' ? 'Все сущности' : ent}
+                  {ENTITY_LABELS[ent] || ent}
                 </option>
               ))}
             </select>

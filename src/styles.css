@@ -184,6 +184,25 @@ body {
 button, input, textarea, select {
   font-family: inherit;
   font-size: inherit;
+  color: inherit; /* кнопки/поля не должны получать системный чёрный цвет */
+}
+
+select option,
+select optgroup {
+  background: var(--surface);
+  color: var(--text);
+}
+
+:root { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+
+/* Алиасы переменных, которые использовались в коде, но не были определены */
+:root {
+  --text-muted: var(--muted);
+  --text-primary: var(--text);
+  --bg-secondary: var(--surface2);
+  --surface-hover: var(--surface2);
+  --radius-xs: 6px;
 }
 
 button {
@@ -2327,8 +2346,9 @@ a {
 .category-select-wrap select {
   border: 0;
   outline: 0;
-  background: none;
+  background: transparent;
   color: var(--text);
+  color-scheme: inherit;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
