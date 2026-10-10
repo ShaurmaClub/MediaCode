@@ -144,6 +144,6 @@ test.describe('Smoke tests', () => {
 
     // page2 should still be somewhat alive, but when navigating it should redirect to login
     await page2.goto('/dashboard');
-    await expect(page2).toHaveURL(/\/login/);
+    await expect(page2.locator('#login-input')).toBeVisible();
   });
 });
