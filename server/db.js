@@ -180,6 +180,17 @@ CREATE TABLE IF NOT EXISTS recruitment_files (
 CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(event_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_points_user ON points(user_id);
+CREATE INDEX IF NOT EXISTS idx_points_completion ON points(task_id, user_id, category);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
+-- Preserve existing history while rejecting any new duplicate completion rewards.
+CREATE TRIGGER IF NOT EXISTS prevent_duplicate_completion
+BEFORE INSERT ON points
+WHEN NEW.category = 'COMPLETION' AND NEW.task_id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM points WHERE task_id = NEW.task_id AND user_id = NEW.user_id AND category = 'COMPLETION')
+BEGIN
+  SELECT RAISE(ABORT, 'Completion reward already exists');
+END;
 CREATE INDEX IF NOT EXISTS idx_applications_task ON applications(task_id);
 CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);

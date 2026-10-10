@@ -52,7 +52,12 @@ export const auth = (req, res, next) => {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация в системе' });
   }
-  req.user = req.session.user;
+  // Sessions identify the account; current permissions always come from the DB.
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.session.user.id);
+  if (!user || user.status !== 'ACTIVE') {
+    return res.status(403).json({ error: 'Аккаунт не активен' });
+  }
+  req.user = { ...req.session.user, role: user.role, status: user.status };
   next();
 };
 

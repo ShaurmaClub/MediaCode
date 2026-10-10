@@ -185,6 +185,10 @@ app.patch('/api/tasks/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   if (!existing) return res.status(404).json({ error: 'Мероприятие не найдено' });
 
+  if (req.user.role !== 'ADMIN' && existing.creator_id !== req.user.id) {
+    return res.status(403).json({ error: 'Изменять мероприятие может только его автор или администратор' });
+  }
+
   const d = req.body || {};
   const title = d.title !== undefined ? String(d.title).trim() : existing.title;
   if (!title) return res.status(400).json({ error: 'Название не может быть пустым' });
@@ -243,6 +247,9 @@ app.delete('/api/tasks/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const taskId = req.params.id;
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   if (!existing) return res.status(404).json({ error: 'Мероприятие не найдено' });
+  if (req.user.role !== 'ADMIN' && existing.creator_id !== req.user.id) {
+    return res.status(403).json({ error: 'Удалять мероприятие может только его автор или администратор' });
+  }
 
   // If points have already been awarded for this task, archive it instead of hard deleting
   const awarded = db.prepare('SELECT COUNT(*) as c FROM points WHERE task_id = ?').get(taskId).c;

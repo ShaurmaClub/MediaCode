@@ -19,6 +19,9 @@ app.post('/api/tasks/:id/apply', strictAuth, role('STUDENT'), (req, res) => {
   }
 
   const body = req.body || {};
+  if (task.deadline && Date.now() > Date.parse(task.deadline.length === 10 ? `${task.deadline}T23:59:59+03:00` : task.deadline)) {
+    return res.status(400).json({ error: 'Срок подачи заявок истёк' });
+  }
   const roleName = body.role_name ? String(body.role_name).trim() : null;
 
   const existingApp = db.prepare('SELECT * FROM applications WHERE task_id = ? AND user_id = ?').get(taskId, req.user.id);
@@ -147,15 +150,29 @@ app.patch('/api/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res
   const appRecord = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
   if (!appRecord) return res.status(404).json({ error: 'Заявка не найдена' });
 
-  const allowedStatuses = ['APPLIED', 'SELECTED', 'REJECTED', 'WITHDRAWN', 'IN_PROGRESS', 'COMPLETION_SUBMITTED', 'COMPLETED', 'NO_SHOW'];
-  const newStatus = req.body.status;
-  if (!allowedStatuses.includes(newStatus)) {
-    return res.status(400).json({ error: 'Недопустимый статус заявки' });
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(appRecord.task_id);
+  if (req.user.role !== 'ADMIN' && task.creator_id !== req.user.id) {
+    return res.status(403).json({ error: 'Управлять участниками может только автор мероприятия или администратор' });
+  }
+  const transitions = {
+    APPLIED: ['SELECTED', 'REJECTED'], SELECTED: ['IN_PROGRESS', 'REJECTED', 'NO_SHOW'],
+    IN_PROGRESS: ['NO_SHOW'], COMPLETION_SUBMITTED: ['IN_PROGRESS', 'NO_SHOW'],
+    REJECTED: ['APPLIED'], WITHDRAWN: [], COMPLETED: [], NO_SHOW: []
+  };
+  const newStatus = req.body?.status;
+  if (!(transitions[appRecord.status] || []).includes(newStatus)) {
+    return res.status(400).json({ error: 'Недопустимый переход статуса. Для завершения используйте подтверждение выполнения.' });
+  }
+  if (['DRAFT', 'CANCELLED', 'ARCHIVED', 'COMPLETED'].includes(task.status)) {
+    return res.status(400).json({ error: 'Управление участием в закрытом мероприятии недоступно' });
+  }
+  if (newStatus === 'SELECTED') {
+    const occupied = db.prepare("SELECT COUNT(*) c FROM applications WHERE task_id = ? AND status IN ('SELECTED','IN_PROGRESS','COMPLETION_SUBMITTED','COMPLETED')").get(task.id).c;
+    if (occupied >= task.required_volunteers) return res.status(409).json({ error: 'Все места уже заняты' });
   }
 
   db.prepare('UPDATE applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStatus, appId);
 
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(appRecord.task_id);
   const statusLabels = {
     SELECTED: 'Вы отобраны медиаволонтёром',
     REJECTED: 'Заявка отклонена',
@@ -187,7 +204,13 @@ app.patch('/api/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res
 // Staff / Admin confirms completion and awards points for a task
 app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, res) => {
   const taskId = req.params.id;
-  const targetUserId = req.body.user_id;
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+  if (!task) return res.status(404).json({ error: 'Мероприятие не найдено' });
+  if (req.user.role !== 'ADMIN' && task.creator_id !== req.user.id) {
+    return res.status(403).json({ error: 'Подтверждать выполнение может только автор мероприятия или администратор' });
+  }
+  if (['DRAFT', 'CANCELLED', 'ARCHIVED'].includes(task.status)) return res.status(400).json({ error: 'Мероприятие закрыто для подтверждения' });
+  const targetUserId = req.body?.user_id;
   if (!targetUserId) return res.status(400).json({ error: 'Укажите ID студента' });
 
   // Prevent duplicate completion reward
@@ -209,7 +232,6 @@ app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, re
     return res.status(400).json({ error: 'У студента нет активной отобранной заявки по этому мероприятию' });
   }
 
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
   const rawPoints = req.body.points !== undefined ? parseInt(req.body.points, 10) : task.points;
   const awardPoints = Math.min(MAX_POINTS_PER_TRANSACTION, Math.max(0, isNaN(rawPoints) ? 0 : rawPoints));
   const reason = req.body.reason || `Успешное выполнение: «${task.title}»`;

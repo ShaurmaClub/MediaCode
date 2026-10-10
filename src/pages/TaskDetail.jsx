@@ -212,6 +212,7 @@ export default function TaskDetail({ user }) {
   if (loading || !task) return <Loader text="Загружаем задание…" />;
 
   const isStaffOrAdmin = user.role !== 'STUDENT';
+  const canManage = user.role === 'ADMIN' || (user.role === 'STAFF' && task.creator_id === user.id);
   const myApp = task.my_application;
 
   return (
@@ -223,7 +224,7 @@ export default function TaskDetail({ user }) {
           <Link to="/tasks" className="btn ghost">
             <ArrowLeft size={16} /> К списку мероприятий
           </Link>
-          {isStaffOrAdmin && (
+          {canManage && (
             <>
               <Link to={`/tasks/${id}/edit`} className="btn ghost">
                 <Edit size={16} /> Редактировать
@@ -699,7 +700,7 @@ export default function TaskDetail({ user }) {
                       )}
 
                       {/* Actions for Staff */}
-                      <div className="applicant-actions">
+                      <div className="applicant-actions" style={!canManage ? { display: 'none' } : undefined}>
                         {app.status === 'APPLIED' && (
                           <>
                             <button
