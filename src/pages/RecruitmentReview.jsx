@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import {
-  Inbox,
   Filter,
   Search,
   CheckCircle,
@@ -10,11 +8,9 @@ import {
   Download,
   ExternalLink,
   UserCheck,
-  UserPlus,
   Phone,
   MessageSquare,
   FileText,
-  AlertCircle,
   Eye,
   Camera,
   Video,
@@ -23,8 +19,8 @@ import {
   Film,
   Mic
 } from 'lucide-react';
-import { api, formatDateTime, formatDate, relativeTime } from '../api.js';
-import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
+import { api, formatDateTime, relativeTime } from '../api.js';
+import { Page, Loader, Empty } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 

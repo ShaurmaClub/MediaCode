@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Filter, RefreshCw, Shield, AlertTriangle } from 'lucide-react';
+import { Filter, RefreshCw } from 'lucide-react';
 import { api, formatDateTime } from '../api.js';
 import { Page, Loader, Empty } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';

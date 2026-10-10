@@ -1,19 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   CalendarDays,
-  Users,
-  BookOpen,
   Clock,
   ArrowUpRight,
   Plus,
-  Sparkles,
   Award,
   Bell,
   CheckCircle2,
-  AlertCircle,
   Inbox,
-  UserCheck,
   Phone,
   MessageSquare,
   ExternalLink,
@@ -21,7 +16,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { api, formatDate, relativeTime } from '../api.js';
-import { Page, Loader, Empty, TaskCard, PointRow, StatusBadge, Avatar } from '../components/UI.jsx';
+import { Page, Loader, Empty, TaskCard, PointRow, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 
@@ -35,8 +30,7 @@ export default function Dashboard({ user }) {
   const [awardReasonText, setAwardReasonText] = useState('');
   const [awardCategoryVal, setAwardCategoryVal] = useState('BONUS');
   const [awardingLoading, setAwardingLoading] = useState(false);
-  const navigate = useNavigate();
-  const toast = useToast();
+    const toast = useToast();
 
   const load = async () => {
     try {

@@ -1,6 +1,6 @@
 import app from '../app.js';
 import db from '../db.js';
-import { strictAuth, role, safeUser, getHumanReadableAudit } from '../lib/shared.js';
+import { strictAuth, safeUser, getHumanReadableAudit } from '../lib/shared.js';
 
 // ==========================================
 // DASHBOARD ROUTE

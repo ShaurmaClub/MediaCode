@@ -1,10 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import {
-  Camera,
-  Video,
-  Palette,
-  Share2,
   CheckCircle2,
   UploadCloud,
   FileCheck,
@@ -12,20 +8,14 @@ import {
   Copy,
   Check,
   AlertCircle,
-  Clock,
   Sparkles,
   ArrowRight,
-  ShieldCheck,
   Moon,
   Sun,
   LogIn,
   ArrowLeft,
   FileText,
-  Trash2,
-  ExternalLink,
-  Film,
-  Mic,
-  Image as ImageIcon
+  ExternalLink
 } from 'lucide-react';
 import { Loader } from '../components/UI.jsx';
 import { RECRUITMENT_TRACKS, TRACK_ICONS } from '../config/recruitmentTracks.js';
@@ -75,8 +65,7 @@ const DEFAULT_SUBMISSION_METHODS = [
 
 export default function PublicRecruitment() {
   const params = useParams();
-  const navigate = useNavigate();
-  const fileInputRef = useRef(null);
+    const fileInputRef = useRef(null);
 
   // Detect track slug from subdomain or route param
   const getSubdomainSlug = () => {
@@ -100,8 +89,7 @@ export default function PublicRecruitment() {
   const [errorMessage, setErrorMessage] = useState('');
   const [submittedData, setSubmittedData] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
-
+  
   // Form State
   const [fullName, setFullName] = useState('');
   const [department, setDepartment] = useState(DEPARTMENTS[0] || '');

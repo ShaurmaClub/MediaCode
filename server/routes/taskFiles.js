@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import storageService from '../storage.js';
-import { strictAuth, role } from '../lib/shared.js';
+import { strictAuth } from '../lib/shared.js';
 
 // ==========================================
 // TASK FILE DOWNLOAD

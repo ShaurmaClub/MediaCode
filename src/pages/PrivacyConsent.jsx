@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Shield, ArrowRight } from 'lucide-react';
 import { api } from '../api.js';
 

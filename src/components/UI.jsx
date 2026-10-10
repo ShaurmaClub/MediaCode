@@ -1,13 +1,9 @@
-import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   CalendarDays,
   MapPin,
   Users,
-  ArrowUpRight,
-  Sparkles,
-  Award,
-  Clock
+  ArrowUpRight
 } from 'lucide-react';
 import { formatDate, relativeTime } from '../api.js';
 
@@ -84,7 +80,7 @@ export const PriorityBadge = ({ priority }) => {
   return <span className={`priority-badge ${item.cls}`}>{item.label}</span>;
 };
 
-export function TaskCard({ task, isStaff = false }) {
+export function TaskCard({ task }) {
   return (
     <Link to={`/tasks/${task.id}`} className="task-card">
       <div className="task-cover">

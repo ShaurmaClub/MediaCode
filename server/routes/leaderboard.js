@@ -1,6 +1,6 @@
 import app from '../app.js';
 import db from '../db.js';
-import { strictAuth, role } from '../lib/shared.js';
+import { strictAuth } from '../lib/shared.js';
 
 // ==========================================
 // LEADERBOARD

@@ -1,7 +1,7 @@
 import app from '../app.js';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
-import { authIpLimiter, authLimiter, auth, strictAuth, role, safeStudentView, safeUser, audit, generateTemporaryPassword, normalizeRussianPhone, normalizeName, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
+import { authIpLimiter, authLimiter, strictAuth, role, safeStudentView, safeUser, audit, generateTemporaryPassword, normalizeRussianPhone, normalizeName, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
 
 // ==========================================
 // USERS & VOLUNTEERS DIRECTORY

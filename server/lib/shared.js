@@ -1,4 +1,3 @@
-import session from 'express-session';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import db from '../db.js';
