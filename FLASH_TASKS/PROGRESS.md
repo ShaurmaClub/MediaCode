@@ -8,3 +8,4 @@
 | 4 | ВЫПОЛНЕНО | be654f2 | Добавлены 11 API-тестов: RBAC, лидерборд, уведомления, отбор, bad input (всего 34 теста) | Нет |
 | 5 | ВЫПОЛНЕНО | 5fa37b5 | Добавлен GitHub Actions workflow .github/workflows/ci.yml (lint, build, test на Node 22) | Нет |
 | 6 | ВЫПОЛНЕНО | fa3bb03 | В tests/e2e/smoke.spec.js исправлен тест двух вкладок: авторизация по логину, выход через API logout | Нет |
+| 7 | ВЫПОЛНЕНО | f018626 | В tests/e2e/smoke.spec.js заменено ожидание URL на видимость формы логина #login-input (8 из 8 тестов Playwright pass) | Нет |
