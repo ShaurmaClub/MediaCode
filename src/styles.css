@@ -2229,6 +2229,8 @@ a {
 }
 
 /* Preview colors */
+/* Превью — это образец конкретной темы, поэтому фон фиксированный (не зависит от активной темы) */
+.preview-system, .preview-light { background: #f1f2f5; border-color: rgba(0, 0, 0, 0.08); }
 .preview-system .preview-bar { background: #13121d; }
 .preview-system .preview-line { background: #ffffff; }
 .preview-system .preview-chip { background: #6d4aff; }

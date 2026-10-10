@@ -23,7 +23,7 @@ test.describe('Smoke tests', () => {
     await page.fill('#password-input', 'Demo123!');
     await page.locator('#password-input').press('Enter');
     // removed waitForURL
-    await expect(page.locator('text=Мои текущие назначения')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=Твой баланс в системе')).toBeVisible({ timeout: 5000 });
     
     await page.click('a[href="/tasks"]');
     await page.waitForURL('/tasks');
@@ -47,7 +47,7 @@ test.describe('Smoke tests', () => {
     
     await page.click('a[href="/recruitment"]');
     await page.waitForURL('/recruitment');
-    await expect(page.locator('text=Наборы в медиацентр')).toBeVisible();
+    await expect(page.locator('text=Заявки на отбор').first()).toBeVisible();
 
     // Tasks
     await page.goto('/tasks');
