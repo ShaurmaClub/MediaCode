@@ -215,10 +215,14 @@ export default function TaskDetail({ user }) {
   const canManage = isStaffOrAdmin;
   const myApp = task.my_application;
 
+  const displayCategory = task.category === 'Другое' && task.custom_category
+    ? task.custom_category
+    : (task.category || 'Событие');
+
   return (
     <Page
       title={task.title}
-      subtitle={`Категория: ${task.category || 'Событие'} · Дата публикации: ${formatDate(task.created_at)}`}
+      subtitle={`Категория: ${displayCategory} · Дата публикации: ${formatDate(task.created_at)}`}
       actions={
         <div className="page-actions-group">
           <Link to="/tasks" className="btn ghost">
@@ -243,7 +247,7 @@ export default function TaskDetail({ user }) {
           <div className="panel detail-hero-panel">
             <div className="detail-hero-top">
               <div className="detail-badges">
-                <span className="badge category-badge">{task.category || 'Событие'}</span>
+                <span className="badge category-badge">{displayCategory}</span>
                 <StatusBadge status={task.status} />
                 <PriorityBadge priority={task.priority} />
               </div>

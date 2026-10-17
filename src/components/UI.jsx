@@ -85,7 +85,9 @@ export function TaskCard({ task }) {
     <Link to={`/tasks/${task.id}`} className="task-card">
       <div className="task-cover">
         <div className="task-cover-top">
-          <span className="badge category-badge">{task.category || 'Событие'}</span>
+          <span className="badge category-badge">
+            {task.category === 'Другое' && task.custom_category ? task.custom_category : (task.category || 'Событие')}
+          </span>
           <PriorityBadge priority={task.priority} />
         </div>
         <div className="task-cover-points">
