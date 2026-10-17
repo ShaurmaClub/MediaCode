@@ -208,6 +208,51 @@ test('task auto-transitions to ASSIGNMENT_IN_PROGRESS when occupied count (inclu
   assert.equal(updatedTask.status, 'ASSIGNMENT_IN_PROGRESS');
 });
 
+test('validateMaxInitData rejects expired or future auth_date and malformed hash before timingSafeEqual', async () => {
+  const crypto = await import('node:crypto');
+  const { validateMaxInitData } = await import('../server/max.js');
+  const prevToken = process.env.MAX_BOT_TOKEN;
+  process.env.MAX_BOT_TOKEN = 'test-max-bot-secret-token';
+
+  function signMaxInitData(userObj, authDateSec) {
+    const params = new URLSearchParams();
+    params.set('auth_date', String(authDateSec));
+    params.set('user', JSON.stringify(userObj));
+    const checkKeys = [];
+    for (const [k, v] of params.entries()) checkKeys.push(`${k}=${v}`);
+    checkKeys.sort();
+    const secretKey = crypto.createHmac('sha256', 'MAXMiniAppAuth').update(process.env.MAX_BOT_TOKEN).digest();
+    const hash = crypto.createHmac('sha256', secretKey).update(checkKeys.join('\n')).digest('hex');
+    params.set('hash', hash);
+    return params.toString();
+  }
+
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const validInit = signMaxInitData({ id: 777, username: 'valid_user' }, nowSec - 60);
+    assert.equal(validateMaxInitData(validInit).valid, true);
+
+    // Older than 24 hours
+    const expiredInit = signMaxInitData({ id: 777, username: 'valid_user' }, nowSec - 86401);
+    assert.equal(validateMaxInitData(expiredInit).valid, false);
+
+    // More than 5 minutes in the future
+    const futureInit = signMaxInitData({ id: 777, username: 'valid_user' }, nowSec + 305);
+    assert.equal(validateMaxInitData(futureInit).valid, false);
+
+    // Non-hex or wrong length hash must not throw and must return valid: false
+    const shortHashInit = `auth_date=${nowSec}&user=${encodeURIComponent(JSON.stringify({ id: 777 }))}&hash=abcd`;
+    assert.equal(validateMaxInitData(shortHashInit).valid, false);
+
+    const nonHexHashInit = `auth_date=${nowSec}&user=${encodeURIComponent(JSON.stringify({ id: 777 }))}&hash=${'z'.repeat(64)}`;
+    assert.equal(validateMaxInitData(nonHexHashInit).valid, false);
+  } finally {
+    if (prevToken === undefined) delete process.env.MAX_BOT_TOKEN;
+    else process.env.MAX_BOT_TOKEN = prevToken;
+  }
+});
+
+
 
 
 
