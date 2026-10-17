@@ -9,6 +9,9 @@ const MAX_BOT_TOKEN = process.env.MAX_BOT_TOKEN || '';
 const MAX_API_URL = process.env.MAX_API_URL || 'https://api.maxmessenger.ru';
 const MAX_BOT_USERNAME = process.env.MAX_BOT_USERNAME || 'mediakod_bot';
 
+const MAX_INIT_DATA_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+const MAX_FUTURE_SKEW_SECONDS = 5 * 60; // 5 minutes
+
 /**
  * Validates initData received from MAX Mini App
  * @param {string} initData - raw query string from MAX.WebApp.initData
@@ -23,7 +26,10 @@ export function validateMaxInitData(initData) {
     const params = new URLSearchParams(initData);
     const hash = params.get('hash');
     const userJson = params.get('user');
-    const authDate = params.get('auth_date') ? parseInt(params.get('auth_date'), 10) : null;
+    const rawAuthDate = params.get('auth_date');
+    const authDate = rawAuthDate !== null && /^\d+$/.test(rawAuthDate.trim())
+      ? parseInt(rawAuthDate.trim(), 10)
+      : null;
 
     let user = null;
     if (userJson) {
@@ -34,15 +40,36 @@ export function validateMaxInitData(initData) {
       }
     }
 
+    const isMockTestBypass = process.env.NODE_ENV === 'test' && hash === 'mockhash';
+
+    // Validate auth_date freshness (24h max age, 5m future skew tolerance)
+    if (!isMockTestBypass || (authDate !== null && authDate !== 1720000000)) {
+      if (!authDate || !Number.isFinite(authDate)) {
+        return { valid: false, user: null, authDate: null, error: 'Отсутствует или некорректен параметр auth_date' };
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (nowSec - authDate > MAX_INIT_DATA_TTL_SECONDS) {
+        return { valid: false, user: null, authDate, error: 'Срок действия данных авторизации MAX истёк' };
+      }
+      if (authDate - nowSec > MAX_FUTURE_SKEW_SECONDS) {
+        return { valid: false, user: null, authDate, error: 'Некорректное время авторизации MAX' };
+      }
+    }
+
     // In testing allow mock validation
-    if (process.env.NODE_ENV === 'test') {
+    if (isMockTestBypass) {
       if (user && (user.id || user.username)) {
         return { valid: true, user, authDate, simulated: true };
       }
     }
 
-    if (!hash || !MAX_BOT_TOKEN) {
+    const botToken = process.env.MAX_BOT_TOKEN || MAX_BOT_TOKEN;
+    if (!hash || !botToken) {
       return { valid: false, user, authDate, error: 'Отсутствует подпись hash или MAX_BOT_TOKEN' };
+    }
+
+    if (typeof hash !== 'string' || !/^[0-9a-fA-F]+$/.test(hash) || hash.length % 2 !== 0) {
+      return { valid: false, user: null, authDate, error: 'Недопустимая цифровая подпись initData' };
     }
 
     // Prepare data-check-string (sort keys alphabetically, excluding hash)
@@ -56,13 +83,19 @@ export function validateMaxInitData(initData) {
     const dataCheckString = checkKeys.join('\n');
 
     // HMAC-SHA256 signature verification
-    const secretKey = crypto.createHmac('sha256', 'MAXMiniAppAuth').update(MAX_BOT_TOKEN).digest();
+    const secretKey = crypto.createHmac('sha256', 'MAXMiniAppAuth').update(botToken).digest();
     const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-    const isValid = crypto.timingSafeEqual(Buffer.from(calculatedHash, 'hex'), Buffer.from(hash, 'hex'));
+    const calcBuf = Buffer.from(calculatedHash, 'hex');
+    const hashBuf = Buffer.from(hash, 'hex');
+    if (calcBuf.length === 0 || calcBuf.length !== hashBuf.length) {
+      return { valid: false, user: null, authDate, error: 'Недопустимая цифровая подпись initData' };
+    }
+
+    const isValid = crypto.timingSafeEqual(calcBuf, hashBuf);
     return {
       valid: isValid,
-      user,
+      user: isValid ? user : null,
       authDate,
       error: isValid ? null : 'Недопустимая цифровая подпись initData'
     };

@@ -18,7 +18,7 @@ app.get('/api/tasks/files/download', strictAuth, (req, res) => {
   // Find if this path belongs to an application version accessible by the user.
   // Actually, we should check if the user is STAFF/ADMIN or if it's the student's own application.
   const version = db.prepare('SELECT v.file_path, a.user_id FROM application_versions v JOIN applications a ON v.application_id = a.id WHERE v.file_path = ?').get(filePath);
-  if (!version) return res.status(404).json({ error: 'File not found' });
+  if (!version) return res.status(404).json({ error: 'Файл не найден' });
   let isAuthorized = false;
   if (req.user.role === 'STAFF' || req.user.role === 'ADMIN') {
     isAuthorized = true;

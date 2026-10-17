@@ -97,6 +97,9 @@ CREATE TABLE IF NOT EXISTS points (
   category TEXT DEFAULT 'OTHER',
   task_id INTEGER,
   issued_by INTEGER,
+  reversal_of_id INTEGER,
+  reversal_reason TEXT,
+  is_reversed INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
@@ -183,14 +186,6 @@ CREATE INDEX IF NOT EXISTS idx_points_user ON points(user_id);
 CREATE INDEX IF NOT EXISTS idx_points_completion ON points(task_id, user_id, category);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
--- Preserve existing history while rejecting any new duplicate completion rewards.
-CREATE TRIGGER IF NOT EXISTS prevent_duplicate_completion
-BEFORE INSERT ON points
-WHEN NEW.category = 'COMPLETION' AND NEW.task_id IS NOT NULL
-  AND EXISTS (SELECT 1 FROM points WHERE task_id = NEW.task_id AND user_id = NEW.user_id AND category = 'COMPLETION')
-BEGIN
-  SELECT RAISE(ABORT, 'Completion reward already exists');
-END;
 CREATE INDEX IF NOT EXISTS idx_applications_task ON applications(task_id);
 CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
@@ -296,6 +291,38 @@ ensureColumn('points', 'reversal_of_id', 'INTEGER');
 ensureColumn('points', 'reversal_reason', 'TEXT');
 ensureColumn('points', 'is_reversed', 'INTEGER DEFAULT 0');
 
+// Idempotent migration: recreate completion uniqueness trigger & index so reversed
+// entries (is_reversed = 1) or counter-entries (reversal_of_id IS NOT NULL) do not block re-awarding.
+db.exec(`
+  DROP TRIGGER IF EXISTS prevent_duplicate_completion;
+  DROP TRIGGER IF EXISTS trg_points_unique_completion_insert;
+  DROP INDEX IF EXISTS idx_points_unique_completion;
+  CREATE TRIGGER prevent_duplicate_completion
+  BEFORE INSERT ON points
+  WHEN NEW.category = 'COMPLETION' AND NEW.task_id IS NOT NULL
+    AND COALESCE(NEW.is_reversed, 0) = 0 AND NEW.reversal_of_id IS NULL
+    AND EXISTS (
+      SELECT 1 FROM points
+      WHERE task_id = NEW.task_id
+        AND user_id = NEW.user_id
+        AND category = 'COMPLETION'
+        AND COALESCE(is_reversed, 0) = 0
+        AND reversal_of_id IS NULL
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'Completion reward already exists');
+  END;
+`);
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_points_unique_completion
+      ON points(task_id, user_id)
+      WHERE category = 'COMPLETION' AND task_id IS NOT NULL AND COALESCE(is_reversed, 0) = 0 AND reversal_of_id IS NULL;
+  `);
+} catch {
+  // Existing DB with historical duplicates keeps working via BEFORE INSERT trigger above
+}
+
 // Ensure canonical recruitment tracks materials URLs
 db.exec(`
   UPDATE recruitment_tracks
@@ -380,8 +407,8 @@ export function seed() {
 
   if (usersCount === 0) {
     const insUser = db.prepare(`
-      INSERT INTO users (login, password_hash, role, first_name, last_name, email, group_name, year, bio, skills, phone, max_contact, privacy_consent_at, privacy_policy_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, '2026-09')
+      INSERT INTO users (login, password_hash, role, first_name, last_name, email, group_name, year, bio, skills, phone, max_contact, max_contact_verified, privacy_consent_at, privacy_policy_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, '2026-09')
     `);
 
     adminId = insUser.run(
@@ -503,7 +530,8 @@ export function seed() {
     );
   }
 
-  // Existing task seed
+  // Existing task seed (dates relative to today so demo tasks never expire)
+  const seedDay = (offsetDays) => new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
   const taskCount = db.prepare('SELECT COUNT(*) as c FROM tasks').get().c;
   if (taskCount === 0) {
     const insTask = db.prepare(`
@@ -516,7 +544,7 @@ export function seed() {
     'Снять ключевые моменты церемонии, провести экспресс-интервью с абитуриентами и их родителями, подготовить фотобанк для сайта.',
     'Событие',
     staffId,
-    '2026-10-05',
+    seedDay(14),
     '11:30',
     '16:00',
     'Главный корпус, Актовый зал',
@@ -524,7 +552,7 @@ export function seed() {
     'Фотография, Интервью, Репортаж',
     30,
     'HIGH',
-    '2026-10-03',
+    seedDay(12),
     'OPEN',
     'Камера Sony A7 III, 2 петлички Boya, объектив 24-70mm',
     'Дресс-код: тёмный верх, бейдж волонтёра медиацентра.'
@@ -535,7 +563,7 @@ export function seed() {
     'Собрать динамичный вертикальный ролик (9:16) для клипов из исходников, отснятых на ярмарке клубов.',
     'Монтаж',
     staffId,
-    '2026-10-12',
+    seedDay(21),
     '14:00',
     '18:00',
     'Медиалаборатория (ауд. 304)',
@@ -543,7 +571,7 @@ export function seed() {
     'Монтаж видео, Premiere Pro, Саунд-дизайн',
     25,
     'NORMAL',
-    '2026-10-10',
+    seedDay(19),
     'OPEN',
     'Рабочая станция Mac Studio в аудитории 304',
     'Материалы находятся на сервере NAS в папке /Clubs2026.'
@@ -554,7 +582,7 @@ export function seed() {
     'Портретная съёмка первокурсников в локациях кампуса для студенческих билетов и доски почёта колледжа.',
     'Фотография',
     staffId,
-    '2026-09-28',
+    seedDay(-19),
     '10:00',
     '15:00',
     'Кампус, Парковая зона',
@@ -562,7 +590,7 @@ export function seed() {
     'Фотография, Портретная съёмка, Lightroom',
     20,
     'NORMAL',
-    '2026-09-27',
+    seedDay(-20),
     'OPEN',
     'Отражатель 5-в-1, софтбокс, Canon R6',
     'Отобрать и передать превью до конца дня.'
@@ -573,7 +601,7 @@ export function seed() {
     'Обеспечить многокамерную трансляцию дискуссии в группу колледжа, контроль звука и титров.',
     'Стрим',
     staffId,
-    '2026-10-18',
+    seedDay(10),
     '13:00',
     '17:00',
     'Конференц-зал',
@@ -581,7 +609,7 @@ export function seed() {
     'OBS Studio, Видеомикшер, Звук',
     35,
     'URGENT',
-    '2026-10-16',
+    seedDay(8),
     'ASSIGNMENT_IN_PROGRESS',
     'Blackmagic ATEM Mini Pro, 3 камеры Panasonic, радиомикрофоны Sennheiser',
     'Генеральный прогон за 1 час до начала трансляции.'
@@ -592,7 +620,7 @@ export function seed() {
     'Создать макеты полиграфических афиш формата А2 и серию баннеров для социальных сетей колледжа.',
     'Дизайн',
     adminId,
-    '2026-09-15',
+    seedDay(-32),
     '10:00',
     '18:00',
     'Дистанционно',
@@ -600,7 +628,7 @@ export function seed() {
     'Figma, Illustrator, Типографика',
     20,
     'NORMAL',
-    '2026-09-14',
+    seedDay(-33),
     'COMPLETED',
     'Компьютер с графическим планшетом',
     'Успешно завершено и отправлено в типографию.'

@@ -51,6 +51,40 @@ export const uploadMiddleware = multer({
   fileFilter
 });
 
+// Magic-byte signatures: the extension alone is client-controlled, so for formats
+// with a well known header we also check the real file content.
+const SIGNATURES = {
+  '.jpg': [[0xFF, 0xD8, 0xFF]],
+  '.jpeg': [[0xFF, 0xD8, 0xFF]],
+  '.png': [[0x89, 0x50, 0x4E, 0x47]],
+  '.gif': [[0x47, 0x49, 0x46, 0x38]],
+  '.webp': [[0x52, 0x49, 0x46, 0x46]],
+  '.pdf': [[0x25, 0x50, 0x44, 0x46]],
+  '.zip': [[0x50, 0x4B]],
+  '.docx': [[0x50, 0x4B]],
+  '.rar': [[0x52, 0x61, 0x72, 0x21]],
+  '.7z': [[0x37, 0x7A, 0xBC, 0xAF]],
+  '.gz': [[0x1F, 0x8B]],
+  '.doc': [[0xD0, 0xCF, 0x11, 0xE0]]
+};
+
+/** Returns true when the stored file header matches its extension (or the extension has no known signature). */
+export function hasValidSignature(filePath, originalName) {
+  const sigs = SIGNATURES[path.extname(originalName || '').toLowerCase()];
+  if (!sigs) return true;
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(8);
+    const n = fs.readSync(fd, buf, 0, 8, 0);
+    return sigs.some((sig) => n >= sig.length && sig.every((b, i) => buf[i] === b));
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 /**
  * Storage service abstraction
  */
@@ -75,6 +109,11 @@ export const storageService = {
       throw new Error('Недопустимый путь к файлу');
     }
     return safePath;
+  },
+
+  /** True if every uploaded multer file really looks like its declared type. */
+  filesHaveValidContent(files) {
+    return files.every((f) => hasValidSignature(path.join(uploadDir, f.filename), f.originalname));
   },
 
   deleteFile(storedName) {

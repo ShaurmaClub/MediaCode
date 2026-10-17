@@ -346,15 +346,9 @@ export default function Login({ onLogin }) {
             <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label htmlFor="password-input">Пароль</label>
-              <a
-                href="https://t.me/Vadim112005"
-                target="_blank"
-                rel="noreferrer"
-                className="text-link"
-                style={{ fontSize: '12px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-              >
-                Проблемы со входом?
-              </a>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted, #8a8f98)' }}>
+                Проблемы со входом? Обратитесь к администратору медиацентра
+              </span>
             </div>
 
             <input

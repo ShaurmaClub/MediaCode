@@ -90,42 +90,51 @@ app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), upload
     return res.status(400).json({ error: 'Отправка отчёта недоступна для вашего текущего статуса' });
   }
 
-  const { comment, materials_url, submission_method } = req.body;
+  const { comment, materials_url, submission_method } = req.body || {};
   const c = comment ? String(comment).trim() : '';
   const mu = materials_url ? String(materials_url).trim() : '';
   let filePath = null;
+
+  if (submission_method !== 'file' && submission_method !== 'link') {
+    if (req.file) storageService.deleteFile(req.file.filename);
+    return res.status(400).json({ error: 'Укажите корректный способ сдачи отчёта (файл или ссылка)' });
+  }
 
   if (submission_method === 'file') {
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не загружен' });
     }
+    if (!storageService.filesHaveValidContent([req.file])) {
+      storageService.deleteFile(req.file.filename);
+      return res.status(400).json({ error: 'Содержимое файла не соответствует его расширению' });
+    }
     filePath = `/uploads/recruitment/${req.file.filename}`;
   } else if (submission_method === 'link') {
     if (!mu) {
+      if (req.file) storageService.deleteFile(req.file.filename);
       return res.status(400).json({ error: 'Не указана ссылка' });
     }
   }
 
-  // Get next version
-  const v = db.prepare('SELECT COALESCE(MAX(version_number), 0) as m FROM application_versions WHERE application_id = ?').get(appRecord.id).m;
-  const nextVer = v + 1;
-
-  db.exec('BEGIN TRANSACTION;');
+  let nextVer;
   try {
-    db.prepare(`
-      INSERT INTO application_versions (application_id, version_number, materials_url, file_path, comment, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(appRecord.id, nextVer, submission_method === 'link' ? mu : null, filePath, c, req.user.id);
+    const saveReportTx = db.transaction(() => {
+      const v = db.prepare('SELECT COALESCE(MAX(version_number), 0) as m FROM application_versions WHERE application_id = ?').get(appRecord.id).m;
+      nextVer = v + 1;
 
-    db.prepare(`
-      UPDATE applications
-      SET status = 'COMPLETION_SUBMITTED', submission_notes = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(c, appRecord.id);
+      db.prepare(`
+        INSERT INTO application_versions (application_id, version_number, materials_url, file_path, comment, created_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(appRecord.id, nextVer, submission_method === 'link' ? mu : null, filePath, c, req.user.id);
 
-    db.exec('COMMIT;');
+      db.prepare(`
+        UPDATE applications
+        SET status = 'COMPLETION_SUBMITTED', submission_notes = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(c, appRecord.id);
+    });
+    saveReportTx();
   } catch (err) {
-    db.exec('ROLLBACK;');
     if (req.file) storageService.deleteFile(req.file.filename);
     return res.status(500).json({ error: 'Ошибка сохранения отчёта' });
   }
@@ -188,7 +197,7 @@ app.patch('/api/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res
   }
 
   if (newStatus === 'SELECTED' && task && task.status === 'OPEN') {
-    const selectedCount = db.prepare("SELECT COUNT(*) as c FROM applications WHERE task_id = ? AND status = 'SELECTED'").get(task.id).c;
+    const selectedCount = db.prepare("SELECT COUNT(*) as c FROM applications WHERE task_id = ? AND status IN ('SELECTED','IN_PROGRESS','COMPLETION_SUBMITTED','COMPLETED')").get(task.id).c;
     if (selectedCount >= task.required_volunteers) {
       db.prepare("UPDATE tasks SET status = 'ASSIGNMENT_IN_PROGRESS', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(task.id);
     }
@@ -207,10 +216,11 @@ app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, re
   const targetUserId = req.body?.user_id;
   if (!targetUserId) return res.status(400).json({ error: 'Укажите ID студента' });
 
-  // Prevent duplicate completion reward
+  // Prevent duplicate active completion reward (ignore reversed entries)
   const alreadyAwarded = db.prepare(`
     SELECT id FROM points
     WHERE task_id = ? AND user_id = ? AND category = 'COMPLETION'
+      AND COALESCE(is_reversed, 0) = 0 AND reversal_of_id IS NULL
   `).get(taskId, targetUserId);
 
   if (alreadyAwarded) {
@@ -222,7 +232,7 @@ app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, re
     WHERE task_id = ? AND user_id = ?
   `).get(taskId, targetUserId);
 
-  if (!appRecord || !['SELECTED', 'IN_PROGRESS', 'COMPLETION_SUBMITTED'].includes(appRecord.status)) {
+  if (!appRecord || !['SELECTED', 'IN_PROGRESS', 'COMPLETION_SUBMITTED', 'COMPLETED'].includes(appRecord.status)) {
     return res.status(400).json({ error: 'У студента нет активной отобранной заявки по этому мероприятию' });
   }
 

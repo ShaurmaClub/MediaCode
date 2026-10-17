@@ -44,7 +44,10 @@ app.get('/api/users', strictAuth, (req, res) => {
   sql += ' GROUP BY u.id ORDER BY points DESC, u.last_name ASC';
 
   const rows = db.prepare(sql).all(...args);
-  res.json(rows.map(row => isStudent ? safeStudentView(row) : safeUser(row)));
+  res.json(rows.map(row => {
+    const precomputed = { totalPoints: row.points, completedTasksCount: row.completed };
+    return isStudent ? safeStudentView(row, precomputed) : safeUser(row, precomputed);
+  }));
 });
 
 // Single user profile with stats and completed tasks
@@ -177,7 +180,7 @@ app.post('/api/users', strictAuth, role('ADMIN'), (req, res) => {
 app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
   let phones = req.body.phones;
   if (typeof phones === 'string') phones = phones.split('\n').map(p => p.trim()).filter(Boolean);
-  if (!Array.isArray(phones)) return res.status(400).json({ error: 'phones must be an array or string' });
+  if (!Array.isArray(phones)) return res.status(400).json({ error: 'Передайте список номеров телефонов (по одному в строке)' });
 
   const added = [];
   const errors = [];

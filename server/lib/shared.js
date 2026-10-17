@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import db from '../db.js';
 
@@ -8,15 +8,26 @@ export const MEDIACODE_CONSENT_VERSION = '2026-09-25';
 
 // Shared college NATs must not turn one IP into one user. Per-account limits
 // stop credential stuffing while this broad ceiling protects the server.
-export const authIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1200, standardHeaders: true, legacyHeaders: false });
+const RATE_LIMIT_MESSAGE = { error: 'Слишком много попыток. Подождите 15 минут и попробуйте снова.' };
+export const authIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1200, standardHeaders: true, legacyHeaders: false, message: RATE_LIMIT_MESSAGE });
 export const authIdentityLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 12,
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: RATE_LIMIT_MESSAGE,
   keyGenerator: (req) => {
-    const value = req.body?.phone || req.body?.login || req.body?.loginOrContact || 'missing';
-    return String(value).replace(/\D/g, '') || String(value).trim().toLowerCase();
+    const value = req.body?.phone || req.body?.login || req.body?.loginOrContact;
+    if (!value) {
+      // Authenticated routes (change-password, change-login...) carry no login in the body:
+      // key them per account, otherwise every user shares a single global bucket.
+      return req.session?.user?.id ? `user:${req.session.user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
+    }
+    // Key = IP + identity: a stranger guessing passwords for an account (e.g. an admin)
+    // from another IP cannot lock the real owner out of it.
+    const identity = normalizeRussianPhone(value) || String(value).trim().toLowerCase();
+    return `${ipKeyGenerator(req.ip)}|${identity}`;
   }
 });
 
@@ -46,6 +57,12 @@ export const recruitmentApplyLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Слишком много попыток отправки заявки. Пожалуйста, подождите 10 минут.' }
 });
+
+// Revoke every session of a user except (optionally) the current one.
+// Used after password changes so a stolen/old session cannot outlive the old password.
+export function revokeUserSessions(userId, exceptSid = null) {
+  db.prepare("DELETE FROM sessions WHERE json_extract(data, '$.user.id') = ? AND sid != ?").run(Number(userId), exceptSid || '');
+}
 
 // Middleware: Verify authentication
 export const auth = (req, res, next) => {
@@ -92,9 +109,9 @@ export const role = (...roles) => (req, res, next) => {
 
 // Helper: safe user object without password_hash and with total points & MAX fields
 // Helper: safe user object for STUDENT viewing other students (privacy)
-export function safeStudentView(u) {
+export function safeStudentView(u, stats = null) {
   if (!u) return null;
-  const fullSafe = safeUser(u);
+  const fullSafe = safeUser(u, stats);
   return {
     id: fullSafe.id,
     first_name: fullSafe.first_name,
@@ -110,10 +127,16 @@ export function safeStudentView(u) {
   };
 }
 
-export function safeUser(u) {
+export function safeUser(u, stats = null) {
   if (!u) return null;
-  const total = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM points WHERE user_id = ?').get(u.id)?.total || 0;
-  const completedCount = db.prepare("SELECT COUNT(*) as cnt FROM applications WHERE user_id = ? AND status = 'COMPLETED'").get(u.id)?.cnt || 0;
+  const rawTotal = stats?.totalPoints ?? stats?.points ?? u.points;
+  const rawCompleted = stats?.completedTasksCount ?? stats?.completed ?? u.completed;
+  const total = rawTotal !== undefined && rawTotal !== null
+    ? Number(rawTotal)
+    : (db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM points WHERE user_id = ?').get(u.id)?.total || 0);
+  const completedCount = rawCompleted !== undefined && rawCompleted !== null
+    ? Number(rawCompleted)
+    : (db.prepare("SELECT COUNT(*) as cnt FROM applications WHERE user_id = ? AND status = 'COMPLETED'").get(u.id)?.cnt || 0);
   return {
     id: u.id,
     public_id: u.public_id,

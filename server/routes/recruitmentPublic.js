@@ -56,6 +56,11 @@ app.post('/api/public/recruitment/apply/:slug', recruitmentApplyLimiter, (req, r
       return res.status(400).json({ error: uploadErr.message });
     }
 
+    if (!storageService.filesHaveValidContent(uploadedFiles)) {
+      cleanupFiles();
+      return res.status(400).json({ error: 'Содержимое файла не соответствует его расширению' });
+    }
+
     const slug = String(req.params.slug).trim().toLowerCase();
     const track = db.prepare('SELECT * FROM recruitment_tracks WHERE LOWER(slug) = ? OR LOWER(type) = ?').get(slug, slug);
     if (!track) {
