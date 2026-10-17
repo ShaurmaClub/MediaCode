@@ -2,11 +2,13 @@ import app from '../app.js';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { validateMaxInitData, getMaxConfig } from '../max.js';
-import { authIpLimiter, authLimiter, auth, safeUser, audit, createNotification, normalizeRussianPhone, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
+import { authIpLimiter, authLimiter, auth, safeUser, audit, createNotification, normalizeRussianPhone, revokeUserSessions, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
 
 // ==========================================
 // AUTH ROUTES
 // ==========================================
+
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-not-a-real-password', 10);
 
 app.get('/api/health', (req, res) => {
   // Реальная проверка БД: при недоступной базе отвечаем 503, чтобы мониторинг/прокси это заметили
@@ -46,8 +48,10 @@ app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
     user = db.prepare("SELECT * FROM users WHERE login = ? AND status = 'ACTIVE'").get(cleanLogin);
   }
   
-  if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
-    audit(user?.id || null, 'LOGIN_FAILED', 'AUTH', null, { login });
+  // Always run a bcrypt comparison so response time does not reveal whether the account exists
+  const passwordOk = bcrypt.compareSync(String(password), user ? user.password_hash : DUMMY_HASH);
+  if (!user || !passwordOk) {
+    audit(user?.id || null, 'LOGIN_FAILED', 'AUTH', null, { login: rawLogin.slice(0, 64) });
     return res.status(401).json({ error: 'Неверный логин, номер телефона или пароль.' });
   }
 
@@ -133,6 +137,7 @@ app.post('/api/auth/change-password', auth, authLimiter, (req, res) => {
 
   const newHash = bcrypt.hashSync(newPassword, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(newHash, req.user.id);
+  revokeUserSessions(req.user.id, req.sessionID);
   audit(req.user.id, 'PASSWORD_CHANGED', 'USER', req.user.id);
   res.json({ ok: true, message: 'Пароль успешно обновлён' });
 });
@@ -164,6 +169,7 @@ app.post('/api/auth/first-login-password-change', auth, authLimiter, (req, res) 
   const newHash = bcrypt.hashSync(String(newPassword), 10);
   db.prepare('UPDATE users SET login = ?, password_hash = ?, must_change_password = 0 WHERE id = ?')
     .run(finalLogin, newHash, req.user.id);
+  revokeUserSessions(req.user.id, req.sessionID);
 
   audit(req.user.id, 'PASSWORD_CHANGED', 'USER', req.user.id, { reason: 'FIRST_LOGIN_SETUP' });
   if (finalLogin !== currentUser.login) {

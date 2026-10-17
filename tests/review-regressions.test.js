@@ -80,3 +80,40 @@ test('Database rejects duplicate completion rewards while preserving ledger', ()
   assert.throws(() => insert.run(userId('student'),id), /Completion reward already exists/);
   assert.equal(db.prepare('SELECT SUM(amount) total FROM points WHERE task_id=?').get(id).total,10);
 });
+
+test('changing the password revokes the account\'s other sessions but keeps the current one', async () => {
+  const current = await login('anna');
+  const other = await login('anna');
+  assert.equal((await request(other, '/auth/me')).status, 200);
+  const change = await request(current, '/auth/change-password', 'POST', { currentPassword: 'Demo123!', newPassword: 'Changed123!' });
+  assert.equal(change.status, 200);
+  assert.equal((await request(other, '/auth/me')).status, 401);
+  assert.equal((await request(current, '/auth/me')).status, 200);
+  const revert = await request(current, '/auth/change-password', 'POST', { currentPassword: 'Changed123!', newPassword: 'Demo123!' });
+  assert.equal(revert.status, 200);
+});
+
+test('password-change rate limit is per account, not one global bucket', async () => {
+  const annaSession = await login('anna');
+  let last;
+  for (let i = 0; i < 12; i++) last = await request(annaSession, '/auth/change-password', 'POST', { currentPassword: 'wrong-password', newPassword: 'Whatever123!' });
+  assert.equal(last.status, 429);
+  const staffAttempt = await request(staff, '/auth/change-password', 'POST', { currentPassword: 'wrong-password', newPassword: 'Whatever123!' });
+  assert.equal(staffAttempt.status, 400);
+});
+
+test('upload signature check rejects disguised files', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { hasValidSignature } = await import('../server/storage.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-'));
+  const fake = path.join(dir, 'fake.jpg');
+  const real = path.join(dir, 'real.jpg');
+  fs.writeFileSync(fake, 'MZ this is an executable');
+  fs.writeFileSync(real, Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0]));
+  assert.equal(hasValidSignature(fake, 'photo.jpg'), false);
+  assert.equal(hasValidSignature(real, 'photo.jpg'), true);
+  assert.equal(hasValidSignature(fake, 'notes.txt'), true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

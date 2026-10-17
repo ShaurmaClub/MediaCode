@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import db from '../db.js';
 
@@ -15,7 +15,12 @@ export const authIdentityLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
-    const value = req.body?.phone || req.body?.login || req.body?.loginOrContact || 'missing';
+    const value = req.body?.phone || req.body?.login || req.body?.loginOrContact;
+    if (!value) {
+      // Authenticated routes (change-password, change-login...) carry no login in the body:
+      // key them per account, otherwise every user shares a single global bucket.
+      return req.session?.user?.id ? `user:${req.session.user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
+    }
     return String(value).replace(/\D/g, '') || String(value).trim().toLowerCase();
   }
 });
@@ -46,6 +51,12 @@ export const recruitmentApplyLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Слишком много попыток отправки заявки. Пожалуйста, подождите 10 минут.' }
 });
+
+// Revoke every session of a user except (optionally) the current one.
+// Used after password changes so a stolen/old session cannot outlive the old password.
+export function revokeUserSessions(userId, exceptSid = null) {
+  db.prepare("DELETE FROM sessions WHERE json_extract(data, '$.user.id') = ? AND sid != ?").run(Number(userId), exceptSid || '');
+}
 
 // Middleware: Verify authentication
 export const auth = (req, res, next) => {
