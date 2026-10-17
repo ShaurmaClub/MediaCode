@@ -21,7 +21,7 @@ export const authIdentityLimiter = rateLimit({
       // key them per account, otherwise every user shares a single global bucket.
       return req.session?.user?.id ? `user:${req.session.user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
     }
-    return String(value).replace(/\D/g, '') || String(value).trim().toLowerCase();
+    return normalizeRussianPhone(value) || String(value).trim().toLowerCase();
   }
 });
 

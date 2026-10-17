@@ -106,6 +106,7 @@ app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), upload
     filePath = `/uploads/recruitment/${req.file.filename}`;
   } else if (submission_method === 'link') {
     if (!mu) {
+      if (req.file) storageService.deleteFile(req.file.filename);
       return res.status(400).json({ error: 'Не указана ссылка' });
     }
   }
