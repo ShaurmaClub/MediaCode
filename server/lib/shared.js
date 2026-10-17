@@ -103,9 +103,9 @@ export const role = (...roles) => (req, res, next) => {
 
 // Helper: safe user object without password_hash and with total points & MAX fields
 // Helper: safe user object for STUDENT viewing other students (privacy)
-export function safeStudentView(u) {
+export function safeStudentView(u, stats = null) {
   if (!u) return null;
-  const fullSafe = safeUser(u);
+  const fullSafe = safeUser(u, stats);
   return {
     id: fullSafe.id,
     first_name: fullSafe.first_name,
@@ -121,10 +121,16 @@ export function safeStudentView(u) {
   };
 }
 
-export function safeUser(u) {
+export function safeUser(u, stats = null) {
   if (!u) return null;
-  const total = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM points WHERE user_id = ?').get(u.id)?.total || 0;
-  const completedCount = db.prepare("SELECT COUNT(*) as cnt FROM applications WHERE user_id = ? AND status = 'COMPLETED'").get(u.id)?.cnt || 0;
+  const rawTotal = stats?.totalPoints ?? stats?.points ?? u.points;
+  const rawCompleted = stats?.completedTasksCount ?? stats?.completed ?? u.completed;
+  const total = rawTotal !== undefined && rawTotal !== null
+    ? Number(rawTotal)
+    : (db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM points WHERE user_id = ?').get(u.id)?.total || 0);
+  const completedCount = rawCompleted !== undefined && rawCompleted !== null
+    ? Number(rawCompleted)
+    : (db.prepare("SELECT COUNT(*) as cnt FROM applications WHERE user_id = ? AND status = 'COMPLETED'").get(u.id)?.cnt || 0);
   return {
     id: u.id,
     public_id: u.public_id,

@@ -172,4 +172,28 @@ test('approve-and-create-user parses 2-word FIO consistently, sets MEDIACODE_CON
   assert.equal(usersWithPhone, 1);
 });
 
+test('safeUser uses precomputed stats without issuing extra N+1 SQL queries', async () => {
+  const { safeUser, safeStudentView } = await import('../server/lib/shared.js');
+  const row = db.prepare('SELECT * FROM users WHERE login = ?').get('student');
+
+  let prepareCalls = 0;
+  const origPrepare = db.prepare.bind(db);
+  db.prepare = (...args) => {
+    prepareCalls++;
+    return origPrepare(...args);
+  };
+  try {
+    const u1 = safeUser(row, { totalPoints: 42, completedTasksCount: 7 });
+    const u2 = safeStudentView(row, { totalPoints: 42, completedTasksCount: 7 });
+    assert.equal(u1.totalPoints, 42);
+    assert.equal(u1.completedTasksCount, 7);
+    assert.equal(u2.totalPoints, 42);
+    assert.equal(u2.completedTasksCount, 7);
+    assert.equal(prepareCalls, 0);
+  } finally {
+    db.prepare = origPrepare;
+  }
+});
+
+
 

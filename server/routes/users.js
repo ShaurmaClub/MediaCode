@@ -44,7 +44,10 @@ app.get('/api/users', strictAuth, (req, res) => {
   sql += ' GROUP BY u.id ORDER BY points DESC, u.last_name ASC';
 
   const rows = db.prepare(sql).all(...args);
-  res.json(rows.map(row => isStudent ? safeStudentView(row) : safeUser(row)));
+  res.json(rows.map(row => {
+    const precomputed = { totalPoints: row.points, completedTasksCount: row.completed };
+    return isStudent ? safeStudentView(row, precomputed) : safeUser(row, precomputed);
+  }));
 });
 
 // Single user profile with stats and completed tasks
