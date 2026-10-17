@@ -407,8 +407,8 @@ export function seed() {
 
   if (usersCount === 0) {
     const insUser = db.prepare(`
-      INSERT INTO users (login, password_hash, role, first_name, last_name, email, group_name, year, bio, skills, phone, max_contact, privacy_consent_at, privacy_policy_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, '2026-09')
+      INSERT INTO users (login, password_hash, role, first_name, last_name, email, group_name, year, bio, skills, phone, max_contact, max_contact_verified, privacy_consent_at, privacy_policy_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, '2026-09')
     `);
 
     adminId = insUser.run(

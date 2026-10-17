@@ -106,15 +106,21 @@ app.patch('/api/auth/profile', auth, (req, res) => {
     if (existingPhoneUser) return res.status(409).json({ error: 'Пользователь с таким номером телефона уже существует.' });
     phone = normalizedPhone;
   }
+  const currentProfile = db.prepare('SELECT max_contact, max_contact_verified FROM users WHERE id = ?').get(req.user.id);
+  const nextMaxVerified = (max_contact !== undefined && max_contact !== null && String(max_contact).trim() !== String(currentProfile?.max_contact || '').trim())
+    ? 0
+    : (currentProfile?.max_contact_verified || 0);
+
   db.prepare(`
     UPDATE users
     SET bio = COALESCE(?, bio),
         phone = COALESCE(?, phone),
         max_contact = COALESCE(?, max_contact),
+        max_contact_verified = ?,
         skills = COALESCE(?, skills),
         theme = COALESCE(?, theme)
     WHERE id = ?
-  `).run(bio, phone, max_contact, skills, theme, req.user.id);
+  `).run(bio, phone, max_contact, nextMaxVerified, skills, theme, req.user.id);
 
   const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   audit(req.user.id, 'PROFILE_UPDATED', 'USER', req.user.id, { theme, skills });
@@ -275,11 +281,15 @@ app.post('/api/auth/max-mini-app', (req, res) => {
   }
 
   const maxUser = validation.user;
-  // Try finding user by max_user_id, or by max_contact/max_username
-  let user = db.prepare('SELECT * FROM users WHERE max_user_id = ?').get(String(maxUser.id));
+  // Auto-link only by max_user_id or verified max_contact (max_contact_verified = 1)
+  let user = maxUser.id !== undefined && maxUser.id !== null
+    ? db.prepare('SELECT * FROM users WHERE max_user_id = ?').get(String(maxUser.id))
+    : null;
   if (!user && maxUser.username) {
-    const cleanUsername = maxUser.username.toLowerCase();
-    user = db.prepare('SELECT * FROM users WHERE LOWER(max_contact) = ? OR LOWER(max_contact) = ?').get(cleanUsername, '@' + cleanUsername);
+    const cleanUsername = String(maxUser.username).toLowerCase();
+    user = db.prepare(
+      'SELECT * FROM users WHERE (LOWER(max_contact) = ? OR LOWER(max_contact) = ?) AND max_contact_verified = 1'
+    ).get(cleanUsername, '@' + cleanUsername);
   }
 
   if (!user) {
@@ -293,9 +303,15 @@ app.post('/api/auth/max-mini-app', (req, res) => {
     });
   }
 
-  const linkedElsewhere = db.prepare('SELECT id FROM users WHERE max_user_id = ? AND id != ?').get(String(maxUser.id), user.id);
-  if (linkedElsewhere) {
-    return res.status(409).json({ error: 'MAX identity is already linked to another account' });
+  if (user.status !== 'ACTIVE') {
+    return res.status(403).json({ error: 'Аккаунт не активен' });
+  }
+
+  if (maxUser.id !== undefined && maxUser.id !== null) {
+    const linkedElsewhere = db.prepare('SELECT id FROM users WHERE max_user_id = ? AND id != ?').get(String(maxUser.id), user.id);
+    if (linkedElsewhere) {
+      return res.status(409).json({ error: 'MAX identity is already linked to another account' });
+    }
   }
 
   // Update max_user_id & verification if not yet set
@@ -305,19 +321,22 @@ app.post('/api/auth/max-mini-app', (req, res) => {
         max_username = COALESCE(max_username, ?),
         max_contact_verified = 1
     WHERE id = ?
-  `).run(String(maxUser.id), maxUser.username || null, user.id);
+  `).run(maxUser.id !== undefined && maxUser.id !== null ? String(maxUser.id) : null, maxUser.username || null, user.id);
 
-  req.session.user = {
-    id: user.id,
-    login: user.login,
-    role: user.role,
-    first_name: user.first_name,
-    last_name: user.last_name
-  };
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Ошибка сессии' });
+    req.session.user = {
+      id: user.id,
+      login: user.login,
+      role: user.role,
+      first_name: user.first_name,
+      last_name: user.last_name
+    };
 
-  audit(user.id, 'LOGIN_SUCCESS', 'AUTH_MAX', user.id);
-  const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-  res.json({ user: safeUser(updatedUser) });
+    audit(user.id, 'LOGIN_SUCCESS', 'AUTH_MAX', user.id);
+    const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    res.json({ user: safeUser(updatedUser) });
+  });
 });
 
 app.post('/api/user/link-max', auth, (req, res) => {

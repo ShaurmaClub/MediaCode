@@ -252,6 +252,29 @@ test('validateMaxInitData rejects expired or future auth_date and malformed hash
   }
 });
 
+test('max-mini-app rejects non-ACTIVE accounts, refuses unverified max_contact auto-link, and regenerates session', async () => {
+  const dmitryId = userId('dmitry');
+  // 1. Unverified max_contact cannot be auto-linked
+  db.prepare('UPDATE users SET max_user_id = NULL, max_contact = ?, max_contact_verified = 0 WHERE id = ?').run('@unverified_dmitry', dmitryId);
+  const unverifiedInit = `user=${encodeURIComponent(JSON.stringify({ id: 555001, username: 'unverified_dmitry' }))}&auth_date=1720000000&hash=mockhash`;
+  const unverifiedRes = await request('', '/auth/max-mini-app', 'POST', { initData: unverifiedInit });
+  assert.equal(unverifiedRes.status, 404);
+
+  // 2. Disabled account with verified max_user_id gets 403
+  db.prepare("UPDATE users SET max_user_id = '555001', max_contact_verified = 1, status = 'DISABLED' WHERE id = ?").run(dmitryId);
+  const disabledRes = await request('', '/auth/max-mini-app', 'POST', { initData: unverifiedInit });
+  assert.equal(disabledRes.status, 403);
+
+  // 3. Active account succeeds and regenerates session cookie
+  db.prepare("UPDATE users SET status = 'ACTIVE' WHERE id = ?").run(dmitryId);
+  const activeRes = await request(student, '/auth/max-mini-app', 'POST', { initData: unverifiedInit });
+  assert.equal(activeRes.status, 200);
+  const newCookie = activeRes.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(newCookie);
+  assert.notEqual(newCookie, student);
+});
+
+
 
 
 
