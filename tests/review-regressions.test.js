@@ -143,3 +143,33 @@ test('reversed completion reward allows re-confirming task completion while pres
   assert.equal(netTaskPoints.cnt, 3);
 });
 
+test('approve-and-create-user parses 2-word FIO consistently, sets MEDIACODE_CONSENT_VERSION, and rejects duplicate phone with 409', async () => {
+  const { MEDIACODE_CONSENT_VERSION } = await import('../server/lib/shared.js');
+  const track = db.prepare('SELECT id FROM recruitment_tracks LIMIT 1').get();
+  const phone = '+79998887766';
+
+  const app1Id = Number(db.prepare(`
+    INSERT INTO recruitment_applications (public_id, track_id, full_name, department, group_name, phone, max_contact, status, consent_accepted_at)
+    VALUES ('MC-T-9001', ?, 'Иванов Иван', 'Учебное отделение «Техно»', 'ИС-21', ?, ?, 'SUBMITTED', CURRENT_TIMESTAMP)
+  `).run(track.id, phone, phone).lastInsertRowid);
+
+  const res1 = await request(staff, `/recruitment/applications/${app1Id}/approve-and-create-user`, 'POST', {});
+  assert.equal(res1.status, 201);
+  const body1 = await res1.json();
+  assert.equal(body1.user.last_name, 'Иванов');
+  assert.equal(body1.user.first_name, 'Иван');
+  assert.equal(body1.user.privacy_policy_version, MEDIACODE_CONSENT_VERSION);
+
+  // Second application with the same phone number must return 409 and not create another user
+  const app2Id = Number(db.prepare(`
+    INSERT INTO recruitment_applications (public_id, track_id, full_name, department, group_name, phone, max_contact, status, consent_accepted_at)
+    VALUES ('MC-T-9002', ?, 'Иванов Иван Иванович', 'Учебное отделение «Техно»', 'ИС-21', ?, ?, 'SUBMITTED', CURRENT_TIMESTAMP)
+  `).run(track.id, phone, phone).lastInsertRowid);
+
+  const res2 = await request(staff, `/recruitment/applications/${app2Id}/approve-and-create-user`, 'POST', {});
+  assert.equal(res2.status, 409);
+  const usersWithPhone = db.prepare('SELECT COUNT(*) as c FROM users WHERE phone = ?').get(phone).c;
+  assert.equal(usersWithPhone, 1);
+});
+
+

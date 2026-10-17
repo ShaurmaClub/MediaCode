@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import db from '../db.js';
 import storageService from '../storage.js';
-import { strictAuth, role, safeUser, audit, createNotification, transliterateToLogin } from '../lib/shared.js';
+import { strictAuth, role, safeUser, audit, createNotification, transliterateToLogin, normalizeRussianPhone, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
 
 // ==========================================
 // STAFF & ADMIN RECRUITMENT REVIEW ROUTES
@@ -161,16 +161,21 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', strictAuth
     });
   }
 
-  // Parse name
+  if (appRecord.phone) {
+    const normalizedPhone = normalizeRussianPhone(appRecord.phone) || String(appRecord.phone).trim();
+    const existingPhoneUser = db.prepare('SELECT id FROM users WHERE phone = ?').get(normalizedPhone);
+    if (existingPhoneUser) {
+      return res.status(409).json({ error: 'Пользователь с таким номером телефона уже существует.' });
+    }
+  }
+
+  // Parse name (consistent Russian FIO order: "Фамилия Имя [Отчество]")
   const nameParts = appRecord.full_name.trim().split(/\s+/);
   let firstName = nameParts[0] || 'Медиаволонтёр';
   let lastName = '';
   let middleName = '';
 
-  if (nameParts.length === 2) {
-    firstName = nameParts[0];
-    lastName = nameParts[1];
-  } else if (nameParts.length >= 3) {
+  if (nameParts.length >= 2) {
     lastName = nameParts[0];
     firstName = nameParts[1];
     middleName = nameParts.slice(2).join(' ');
@@ -207,7 +212,7 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', strictAuth
         login, password_hash, role, first_name, last_name, middle_name,
         email, group_name, year, bio, skills, phone, max_contact, status, must_change_password,
         privacy_consent_at, privacy_policy_version
-      ) VALUES (?, ?, 'STUDENT', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'ACTIVE', 1, CURRENT_TIMESTAMP, '2026-09')
+      ) VALUES (?, ?, 'STUDENT', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'ACTIVE', 1, CURRENT_TIMESTAMP, ?)
     `).run(
       login,
       pwHash,
@@ -219,7 +224,8 @@ app.post('/api/recruitment/applications/:id/approve-and-create-user', strictAuth
       `Медиаволонтёр медиацентра (направление «${appRecord.track_name}»).`,
       skill,
       appRecord.phone,
-      appRecord.max_contact
+      appRecord.max_contact,
+      MEDIACODE_CONSENT_VERSION
     );
 
     newUserId = r.lastInsertRowid;
