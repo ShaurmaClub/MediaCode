@@ -90,10 +90,15 @@ app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), upload
     return res.status(400).json({ error: 'Отправка отчёта недоступна для вашего текущего статуса' });
   }
 
-  const { comment, materials_url, submission_method } = req.body;
+  const { comment, materials_url, submission_method } = req.body || {};
   const c = comment ? String(comment).trim() : '';
   const mu = materials_url ? String(materials_url).trim() : '';
   let filePath = null;
+
+  if (submission_method !== 'file' && submission_method !== 'link') {
+    if (req.file) storageService.deleteFile(req.file.filename);
+    return res.status(400).json({ error: 'Укажите корректный способ сдачи отчёта (файл или ссылка)' });
+  }
 
   if (submission_method === 'file') {
     if (!req.file) {
@@ -111,26 +116,25 @@ app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), upload
     }
   }
 
-  // Get next version
-  const v = db.prepare('SELECT COALESCE(MAX(version_number), 0) as m FROM application_versions WHERE application_id = ?').get(appRecord.id).m;
-  const nextVer = v + 1;
-
-  db.exec('BEGIN TRANSACTION;');
+  let nextVer;
   try {
-    db.prepare(`
-      INSERT INTO application_versions (application_id, version_number, materials_url, file_path, comment, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(appRecord.id, nextVer, submission_method === 'link' ? mu : null, filePath, c, req.user.id);
+    const saveReportTx = db.transaction(() => {
+      const v = db.prepare('SELECT COALESCE(MAX(version_number), 0) as m FROM application_versions WHERE application_id = ?').get(appRecord.id).m;
+      nextVer = v + 1;
 
-    db.prepare(`
-      UPDATE applications
-      SET status = 'COMPLETION_SUBMITTED', submission_notes = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(c, appRecord.id);
+      db.prepare(`
+        INSERT INTO application_versions (application_id, version_number, materials_url, file_path, comment, created_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(appRecord.id, nextVer, submission_method === 'link' ? mu : null, filePath, c, req.user.id);
 
-    db.exec('COMMIT;');
+      db.prepare(`
+        UPDATE applications
+        SET status = 'COMPLETION_SUBMITTED', submission_notes = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(c, appRecord.id);
+    });
+    saveReportTx();
   } catch (err) {
-    db.exec('ROLLBACK;');
     if (req.file) storageService.deleteFile(req.file.filename);
     return res.status(500).json({ error: 'Ошибка сохранения отчёта' });
   }

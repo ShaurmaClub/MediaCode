@@ -274,6 +274,44 @@ test('max-mini-app rejects non-ACTIVE accounts, refuses unverified max_contact a
   assert.notEqual(newCookie, student);
 });
 
+test('submit-completion rejects missing or unknown submission_method and accepts valid link submission atomically', async () => {
+  const sofiaSession = await login('sofia');
+  const taskId = task(userId('staff'));
+  const stuId = userId('sofia');
+  const appId = Number(db.prepare("INSERT INTO applications(task_id, user_id, status) VALUES(?, ?, 'SELECTED')").run(taskId, stuId).lastInsertRowid);
+
+  // Missing submission_method must return 400 and not change status
+  const emptyRes = await request(sofiaSession, `/tasks/${taskId}/submit-completion`, 'POST', { comment: 'No method' });
+  assert.equal(emptyRes.status, 400);
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status, 'SELECTED');
+
+  // Unknown submission_method with attached file must return 400 and delete the uploaded file
+  const fs = await import('node:fs');
+  const { default: storage } = await import('../server/storage.js');
+  const beforeFiles = new Set(fs.readdirSync(storage.getUploadDir()));
+  const form = new FormData();
+  form.append('submission_method', 'invalid_method');
+  form.append('file', new Blob(['hello'], { type: 'text/plain' }), 'orphan.txt');
+  const badFormRes = await fetch(`${base}/tasks/${taskId}/submit-completion`, {
+    method: 'POST',
+    headers: { Cookie: sofiaSession },
+    body: form
+  });
+  assert.equal(badFormRes.status, 400);
+  const afterFiles = fs.readdirSync(storage.getUploadDir()).filter(f => !beforeFiles.has(f));
+  assert.equal(afterFiles.length, 0);
+
+  // Valid link submission succeeds
+  const validLinkRes = await request(sofiaSession, `/tasks/${taskId}/submit-completion`, 'POST', {
+    submission_method: 'link',
+    materials_url: 'https://disk.yandex.ru/d/valid_report',
+    comment: 'Done'
+  });
+  assert.equal(validLinkRes.status, 200);
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status, 'COMPLETION_SUBMITTED');
+});
+
+
 
 
 
