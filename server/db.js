@@ -97,6 +97,9 @@ CREATE TABLE IF NOT EXISTS points (
   category TEXT DEFAULT 'OTHER',
   task_id INTEGER,
   issued_by INTEGER,
+  reversal_of_id INTEGER,
+  reversal_reason TEXT,
+  is_reversed INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
@@ -183,14 +186,6 @@ CREATE INDEX IF NOT EXISTS idx_points_user ON points(user_id);
 CREATE INDEX IF NOT EXISTS idx_points_completion ON points(task_id, user_id, category);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
--- Preserve existing history while rejecting any new duplicate completion rewards.
-CREATE TRIGGER IF NOT EXISTS prevent_duplicate_completion
-BEFORE INSERT ON points
-WHEN NEW.category = 'COMPLETION' AND NEW.task_id IS NOT NULL
-  AND EXISTS (SELECT 1 FROM points WHERE task_id = NEW.task_id AND user_id = NEW.user_id AND category = 'COMPLETION')
-BEGIN
-  SELECT RAISE(ABORT, 'Completion reward already exists');
-END;
 CREATE INDEX IF NOT EXISTS idx_applications_task ON applications(task_id);
 CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
@@ -295,6 +290,38 @@ ensureColumn('applications', 'role_name', 'TEXT');
 ensureColumn('points', 'reversal_of_id', 'INTEGER');
 ensureColumn('points', 'reversal_reason', 'TEXT');
 ensureColumn('points', 'is_reversed', 'INTEGER DEFAULT 0');
+
+// Idempotent migration: recreate completion uniqueness trigger & index so reversed
+// entries (is_reversed = 1) or counter-entries (reversal_of_id IS NOT NULL) do not block re-awarding.
+db.exec(`
+  DROP TRIGGER IF EXISTS prevent_duplicate_completion;
+  DROP TRIGGER IF EXISTS trg_points_unique_completion_insert;
+  DROP INDEX IF EXISTS idx_points_unique_completion;
+  CREATE TRIGGER prevent_duplicate_completion
+  BEFORE INSERT ON points
+  WHEN NEW.category = 'COMPLETION' AND NEW.task_id IS NOT NULL
+    AND COALESCE(NEW.is_reversed, 0) = 0 AND NEW.reversal_of_id IS NULL
+    AND EXISTS (
+      SELECT 1 FROM points
+      WHERE task_id = NEW.task_id
+        AND user_id = NEW.user_id
+        AND category = 'COMPLETION'
+        AND COALESCE(is_reversed, 0) = 0
+        AND reversal_of_id IS NULL
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'Completion reward already exists');
+  END;
+`);
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_points_unique_completion
+      ON points(task_id, user_id)
+      WHERE category = 'COMPLETION' AND task_id IS NOT NULL AND COALESCE(is_reversed, 0) = 0 AND reversal_of_id IS NULL;
+  `);
+} catch {
+  // Existing DB with historical duplicates keeps working via BEFORE INSERT trigger above
+}
 
 // Ensure canonical recruitment tracks materials URLs
 db.exec(`

@@ -93,6 +93,15 @@ app.post('/api/points/:id/reverse', strictAuth, role('ADMIN'), (req, res) => {
     );
     counterTxId = r.lastInsertRowid;
 
+    // 2.5. If reversing a task completion reward, reopen the application so it can be re-confirmed
+    if (original.category === 'COMPLETION' && original.task_id) {
+      db.prepare(`
+        UPDATE applications
+        SET status = 'COMPLETION_SUBMITTED', updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = ? AND user_id = ? AND status = 'COMPLETED'
+      `).run(original.task_id, original.user_id);
+    }
+
     // 3. Notify student
     createNotification(
       original.user_id,

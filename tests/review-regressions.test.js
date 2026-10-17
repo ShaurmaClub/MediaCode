@@ -117,3 +117,29 @@ test('upload signature check rejects disguised files', async () => {
   assert.equal(hasValidSignature(fake, 'notes.txt'), true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('reversed completion reward allows re-confirming task completion while preserving ledger history', async () => {
+  const taskId = task(userId('staff'));
+  const studentId = userId('student');
+  db.prepare("INSERT INTO applications(task_id, user_id, status) VALUES(?, ?, 'SELECTED')").run(taskId, studentId);
+
+  const firstComplete = await request(staff, `/tasks/${taskId}/complete`, 'POST', { user_id: studentId, points: 15 });
+  assert.equal(firstComplete.status, 200);
+
+  const duplicateComplete = await request(staff, `/tasks/${taskId}/complete`, 'POST', { user_id: studentId, points: 15 });
+  assert.equal(duplicateComplete.status, 409);
+
+  const pointRow = db.prepare("SELECT id FROM points WHERE task_id = ? AND user_id = ? AND category = 'COMPLETION' AND COALESCE(is_reversed, 0) = 0").get(taskId, studentId);
+  assert.ok(pointRow?.id);
+
+  const reverseRes = await request(admin, `/points/${pointRow.id}/reverse`, 'POST', { reason: 'Ошибочная сумма баллов' });
+  assert.equal(reverseRes.status, 200);
+
+  const secondComplete = await request(staff, `/tasks/${taskId}/complete`, 'POST', { user_id: studentId, points: 25 });
+  assert.equal(secondComplete.status, 200);
+
+  const netTaskPoints = db.prepare('SELECT SUM(amount) as total, COUNT(*) as cnt FROM points WHERE task_id = ? AND user_id = ?').get(taskId, studentId);
+  assert.equal(netTaskPoints.total, 25);
+  assert.equal(netTaskPoints.cnt, 3);
+});
+

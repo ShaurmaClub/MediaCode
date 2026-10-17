@@ -212,10 +212,11 @@ app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, re
   const targetUserId = req.body?.user_id;
   if (!targetUserId) return res.status(400).json({ error: 'Укажите ID студента' });
 
-  // Prevent duplicate completion reward
+  // Prevent duplicate active completion reward (ignore reversed entries)
   const alreadyAwarded = db.prepare(`
     SELECT id FROM points
     WHERE task_id = ? AND user_id = ? AND category = 'COMPLETION'
+      AND COALESCE(is_reversed, 0) = 0 AND reversal_of_id IS NULL
   `).get(taskId, targetUserId);
 
   if (alreadyAwarded) {
@@ -227,7 +228,7 @@ app.post('/api/tasks/:id/complete', strictAuth, role('STAFF', 'ADMIN'), (req, re
     WHERE task_id = ? AND user_id = ?
   `).get(taskId, targetUserId);
 
-  if (!appRecord || !['SELECTED', 'IN_PROGRESS', 'COMPLETION_SUBMITTED'].includes(appRecord.status)) {
+  if (!appRecord || !['SELECTED', 'IN_PROGRESS', 'COMPLETION_SUBMITTED', 'COMPLETED'].includes(appRecord.status)) {
     return res.status(400).json({ error: 'У студента нет активной отобранной заявки по этому мероприятию' });
   }
 
