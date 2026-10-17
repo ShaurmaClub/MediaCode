@@ -99,6 +99,10 @@ app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), upload
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не загружен' });
     }
+    if (!storageService.filesHaveValidContent([req.file])) {
+      storageService.deleteFile(req.file.filename);
+      return res.status(400).json({ error: 'Содержимое файла не соответствует его расширению' });
+    }
     filePath = `/uploads/recruitment/${req.file.filename}`;
   } else if (submission_method === 'link') {
     if (!mu) {
