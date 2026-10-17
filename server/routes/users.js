@@ -180,7 +180,7 @@ app.post('/api/users', strictAuth, role('ADMIN'), (req, res) => {
 app.post('/api/users/mass-create', strictAuth, role('ADMIN'), (req, res) => {
   let phones = req.body.phones;
   if (typeof phones === 'string') phones = phones.split('\n').map(p => p.trim()).filter(Boolean);
-  if (!Array.isArray(phones)) return res.status(400).json({ error: 'phones must be an array or string' });
+  if (!Array.isArray(phones)) return res.status(400).json({ error: 'Передайте список номеров телефонов (по одному в строке)' });
 
   const added = [];
   const errors = [];

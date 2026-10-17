@@ -1,4 +1,4 @@
-import { before, after, test } from 'node:test';
+﻿import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.NODE_ENV = 'test';
@@ -96,7 +96,7 @@ test('changing the password revokes the account\'s other sessions but keeps the 
 test('password-change rate limit is per account, not one global bucket', async () => {
   const annaSession = await login('anna');
   let last;
-  for (let i = 0; i < 12; i++) last = await request(annaSession, '/auth/change-password', 'POST', { currentPassword: 'wrong-password', newPassword: 'Whatever123!' });
+  for (let i = 0; i < 13; i++) last = await request(annaSession, '/auth/change-password', 'POST', { currentPassword: 'wrong-password', newPassword: 'Whatever123!' });
   assert.equal(last.status, 429);
   const staffAttempt = await request(staff, '/auth/change-password', 'POST', { currentPassword: 'wrong-password', newPassword: 'Whatever123!' });
   assert.equal(staffAttempt.status, 400);
@@ -316,4 +316,19 @@ test('submit-completion rejects missing or unknown submission_method and accepts
 
 
 
+
+
+test('failed logins from a stranger IP cannot lock the real admin out; limit message is in Russian', async () => {
+  const attempt = (ip, password) => fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': ip },
+    body: JSON.stringify({ login: 'admin', password })
+  });
+  let last;
+  for (let i = 0; i < 13; i++) last = await attempt('203.0.113.10', 'wrong-password');
+  assert.equal(last.status, 429);
+  assert.match((await last.json()).error, /Слишком много попыток/);
+  // Real owner from another IP is not affected
+  assert.equal((await attempt('198.51.100.7', 'Demo123!')).status, 200);
+});
 

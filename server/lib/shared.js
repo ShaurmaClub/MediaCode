@@ -8,12 +8,15 @@ export const MEDIACODE_CONSENT_VERSION = '2026-09-25';
 
 // Shared college NATs must not turn one IP into one user. Per-account limits
 // stop credential stuffing while this broad ceiling protects the server.
-export const authIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1200, standardHeaders: true, legacyHeaders: false });
+const RATE_LIMIT_MESSAGE = { error: 'Слишком много попыток. Подождите 15 минут и попробуйте снова.' };
+export const authIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1200, standardHeaders: true, legacyHeaders: false, message: RATE_LIMIT_MESSAGE });
 export const authIdentityLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 12,
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: RATE_LIMIT_MESSAGE,
   keyGenerator: (req) => {
     const value = req.body?.phone || req.body?.login || req.body?.loginOrContact;
     if (!value) {
@@ -21,7 +24,10 @@ export const authIdentityLimiter = rateLimit({
       // key them per account, otherwise every user shares a single global bucket.
       return req.session?.user?.id ? `user:${req.session.user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
     }
-    return normalizeRussianPhone(value) || String(value).trim().toLowerCase();
+    // Key = IP + identity: a stranger guessing passwords for an account (e.g. an admin)
+    // from another IP cannot lock the real owner out of it.
+    const identity = normalizeRussianPhone(value) || String(value).trim().toLowerCase();
+    return `${ipKeyGenerator(req.ip)}|${identity}`;
   }
 });
 
