@@ -193,7 +193,7 @@ app.patch('/api/applications/:id', strictAuth, role('STAFF', 'ADMIN'), (req, res
   }
 
   if (newStatus === 'SELECTED' && task && task.status === 'OPEN') {
-    const selectedCount = db.prepare("SELECT COUNT(*) as c FROM applications WHERE task_id = ? AND status = 'SELECTED'").get(task.id).c;
+    const selectedCount = db.prepare("SELECT COUNT(*) as c FROM applications WHERE task_id = ? AND status IN ('SELECTED','IN_PROGRESS','COMPLETION_SUBMITTED','COMPLETED')").get(task.id).c;
     if (selectedCount >= task.required_volunteers) {
       db.prepare("UPDATE tasks SET status = 'ASSIGNMENT_IN_PROGRESS', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(task.id);
     }

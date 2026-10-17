@@ -195,5 +195,19 @@ test('safeUser uses precomputed stats without issuing extra N+1 SQL queries', as
   }
 });
 
+test('task auto-transitions to ASSIGNMENT_IN_PROGRESS when occupied count (including IN_PROGRESS/COMPLETED) reaches required_volunteers', async () => {
+  const taskId = Number(db.prepare("INSERT INTO tasks(title, creator_id, status, event_date, required_volunteers) VALUES('Multi-slot task', ?, 'OPEN', '2099-01-01', 2)").run(userId('staff')).lastInsertRowid);
+  const insertApp = db.prepare("INSERT INTO applications(task_id, user_id, status) VALUES(?, ?, ?)");
+  insertApp.run(taskId, userId('student'), 'IN_PROGRESS');
+  const secondAppId = Number(insertApp.run(taskId, userId('anna'), 'APPLIED').lastInsertRowid);
+
+  const selectRes = await request(staff, `/applications/${secondAppId}`, 'PATCH', { status: 'SELECTED' });
+  assert.equal(selectRes.status, 200);
+
+  const updatedTask = db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId);
+  assert.equal(updatedTask.status, 'ASSIGNMENT_IN_PROGRESS');
+});
+
+
 
 
