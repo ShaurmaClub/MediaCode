@@ -18,7 +18,16 @@ import { api, formatDate, formatDateTime } from '../api.js';
 import { Page, Loader, Empty, StatusBadge, PriorityBadge, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
-import { isValidYandexDiskLink } from './PublicRecruitment.jsx';
+
+function isValidUrl(string) {
+  if (!string || typeof string !== 'string') return false;
+  try {
+    const url = new URL(string.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 const SKILL_MAP = {
   'Photography': 'Фотография',
@@ -128,9 +137,10 @@ export default function TaskDetail({ user }) {
     let body;
 
     if (submissionMethod === 'link') {
-      if (!materialsUrl.trim()) return toast.error('Укажите ссылку на материалы');
-      if (!isValidYandexDiskLink(materialsUrl.trim())) return toast.error('Укажите корректную ссылку на Яндекс Диск');
-      body = JSON.stringify({ comment, materials_url: materialsUrl.trim(), submission_method: 'link' });
+      const trimmedUrl = materialsUrl.trim();
+      if (!trimmedUrl) return toast.error('Укажите ссылку на материалы');
+      if (!isValidUrl(trimmedUrl)) return toast.error('Укажите корректную ссылку (начиная с http:// или https://)');
+      body = JSON.stringify({ comment, materials_url: trimmedUrl, submission_method: 'link' });
     } else {
       const fileInput = document.getElementById('taskFile');
       if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
@@ -439,7 +449,7 @@ export default function TaskDetail({ user }) {
                       <b style={{ display: "block", marginBottom: "8px" }}>Материалы выполненной работы:</b>
                       <div className="tabs" style={{ marginBottom: "12px" }}>
                         <button type="button" className={`tab ${submissionMethod === "link" ? "active" : ""}`} onClick={() => setSubmissionMethod("link")}>
-                          Ссылка на Яндекс Диск
+                          Ссылка на материалы
                         </button>
                         <button type="button" className={`tab ${submissionMethod === "file" ? "active" : ""}`} onClick={() => setSubmissionMethod("file")}>
                           Загрузить файл
@@ -449,7 +459,7 @@ export default function TaskDetail({ user }) {
                       {submissionMethod === "link" ? (
                         <input
                           type="url"
-                          placeholder="https://disk.yandex.ru/..."
+                          placeholder="https://..."
                           value={materialsUrl}
                           onChange={(e) => setMaterialsUrl(e.target.value)}
                           required
@@ -533,7 +543,7 @@ export default function TaskDetail({ user }) {
                           <b style={{ display: "block", marginBottom: "8px" }}>Новые материалы работы:</b>
                           <div className="tabs" style={{ marginBottom: "12px" }}>
                             <button type="button" className={`tab ${submissionMethod === "link" ? "active" : ""}`} onClick={() => setSubmissionMethod("link")}>
-                              Ссылка на Яндекс Диск
+                              Ссылка на материалы
                             </button>
                             <button type="button" className={`tab ${submissionMethod === "file" ? "active" : ""}`} onClick={() => setSubmissionMethod("file")}>
                               Загрузить файл
@@ -543,7 +553,7 @@ export default function TaskDetail({ user }) {
                           {submissionMethod === "link" ? (
                             <input
                               type="url"
-                              placeholder="https://disk.yandex.ru/..."
+                              placeholder="https://..."
                               value={materialsUrl}
                               onChange={(e) => setMaterialsUrl(e.target.value)}
                               required

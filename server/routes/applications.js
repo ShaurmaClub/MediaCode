@@ -114,6 +114,16 @@ app.post('/api/tasks/:id/submit-completion', strictAuth, role('STUDENT'), upload
       if (req.file) storageService.deleteFile(req.file.filename);
       return res.status(400).json({ error: 'Не указана ссылка' });
     }
+    try {
+      const parsedUrl = new URL(mu);
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        if (req.file) storageService.deleteFile(req.file.filename);
+        return res.status(400).json({ error: 'Ссылка должна начинаться с http:// или https://' });
+      }
+    } catch {
+      if (req.file) storageService.deleteFile(req.file.filename);
+      return res.status(400).json({ error: 'Укажите корректный формат ссылки' });
+    }
   }
 
   let nextVer;
