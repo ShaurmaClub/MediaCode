@@ -1,23 +1,244 @@
-name: CI
+name: MediaCode CI/CD (Ubuntu 24.04)
 
 on:
-  pull_request:
   push:
+    branches: [main, dev, "ci/**", "feat/**", "fix/**"]
+  pull_request:
     branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  # ============================================================================
+  # 1. БЕЗОПАСНОСТЬ, СЕКРЕТЫ И АУДИТ ПАКЕТОВ
+  # ============================================================================
+  security-and-packages:
+    name: "🔒 Security, Secrets & Packages (Ubuntu 24.04)"
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npx eslint . --quiet
-      - run: npm run build
-      - run: npm test
+
+      - name: Scan commit history for leaked secrets (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies strictly from lockfile (npm ci)
+        run: npm ci
+
+      - name: Run internal Security & Guardrail Checks
+        run: npm run test:security
+
+      - name: Audit production dependencies for High/Critical vulnerabilities
+        run: npm run audit:prod
+
+  # ============================================================================
+  # 2. ЛИНТЕР И ПРОДАКШН-СБОРКА БАHДЛА
+  # ============================================================================
+  lint-and-build:
+    name: "🏗️ Lint & Production Build (Ubuntu 24.04)"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint static analysis
+        run: npm run lint
+
+      - name: Build production frontend bundle
+        run: npm run build
+
+      - name: Verify production bundle integrity & no leaked source maps
+        run: npm run test:dist
+
+      - name: Upload production dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediacode-dist
+          path: dist/
+          retention-days: 7
+
+  # ============================================================================
+  # 3. ИНТЕГРАЦИОННЫЕ, RBAC, SECURITY И E2E SMOKE ТЕСТЫ
+  # ============================================================================
+  tests:
+    name: "🧪 Integration, Security & E2E Tests (Ubuntu 24.04)"
+    runs-on: ubuntu-24.04
+    needs: [lint-and-build]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download built frontend artifact (dist/)
+        uses: actions/download-artifact@v4
+        with:
+          name: mediacode-dist
+          path: dist/
+
+      - name: Run API, Auth, RBAC, SQLite & Security Regression Tests (52 tests)
+        run: npm test
         env:
           NODE_ENV: test
-          SESSION_SECRET: ci-test-secret
+          SESSION_SECRET: ci-test-secret-key-minimum-32-characters-long
+
+      - name: Install Playwright Chromium for E2E Smoke tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E Smoke Suite
+        run: npx playwright test
+        env:
+          SESSION_SECRET: ci-test-secret-key-minimum-32-characters-long
+
+  # ============================================================================
+  # 4. АЛЕРТ ПРИ ПАДЕНИИ ТЕСТОВ / БЕЗОПАСНОСТИ (БЛОКИРОВКА ДЕПЛОЯ)
+  # ============================================================================
+  notify-ci-failure:
+    name: "🚨 Alert on CI Failure"
+    runs-on: ubuntu-24.04
+    needs: [security-and-packages, lint-and-build, tests]
+    if: always() && (needs.security-and-packages.result == 'failure' || needs.lint-and-build.result == 'failure' || needs.tests.result == 'failure')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Send CI Failure Alert (Telegram / Webhook)
+        run: node scripts/ci-notify.mjs
+        env:
+          CI_STATUS: failure
+          CI_STAGE: "CI Gate (Тесты / Безопасность / Сборка)"
+          CI_FAILED_STEPS: "Security=${{ needs.security-and-packages.result }}, Build=${{ needs.lint-and-build.result }}, Tests=${{ needs.tests.result }}"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+
+  # ============================================================================
+  # 5. АВТОДЕПЛОЙ НА STAGING (ветка dev -> stage.kaiton.ru)
+  # ============================================================================
+  deploy-staging:
+    name: "🚀 Deploy to Staging (stage.kaiton.ru)"
+    runs-on: ubuntu-24.04
+    needs: [security-and-packages, lint-and-build, tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    environment:
+      name: staging
+      url: https://stage.kaiton.ru
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Ubuntu 24.04 Staging via SSH
+        env:
+          SSH_HOST: ${{ secrets.STAGE_SSH_HOST || secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.STAGE_SSH_USER || secrets.SSH_USER || 'deploy' }}
+          SSH_PORT: ${{ secrets.STAGE_SSH_PORT || secrets.SSH_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.STAGE_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
+          APP_DIR: ${{ secrets.STAGE_APP_DIR || '/var/www/mediacode-stage' }}
+          SERVICE_NAME: ${{ secrets.STAGE_SERVICE_NAME || 'mediacode-stage' }}
+          HEALTH_URL: ${{ secrets.STAGE_HEALTH_URL || 'http://127.0.0.1:4001/api/health' }}
+          DEPLOY_MODE: ${{ secrets.DEPLOY_MODE || 'auto' }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "⚠️ Секреты SSH_HOST / SSH_PRIVATE_KEY ещё не добавлены в GitHub Secrets. Автодеплой на staging пропущен."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            "${SSH_USER}@${SSH_HOST}" \
+            "APP_DIR='${APP_DIR}' BRANCH='dev' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' DEPLOY_MODE='${DEPLOY_MODE}' bash -s" < deploy/remote-deploy.sh
+
+      - name: Notify Staging Deploy Result
+        if: always()
+        run: node scripts/ci-notify.mjs
+        env:
+          CI_STATUS: ${{ job.status }}
+          CI_STAGE: "Staging Deploy (stage.kaiton.ru)"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+
+  # ============================================================================
+  # 6. АВТОДЕПЛОЙ НА PRODUCTION (ветка main -> kaiton.ru)
+  # ============================================================================
+  deploy-production:
+    name: "🚀 Deploy to Production (kaiton.ru)"
+    runs-on: ubuntu-24.04
+    needs: [security-and-packages, lint-and-build, tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://kaiton.ru
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Ubuntu 24.04 Production via SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          APP_DIR: ${{ secrets.PROD_APP_DIR || '/var/www/mediacode' }}
+          SERVICE_NAME: ${{ secrets.PROD_SERVICE_NAME || 'mediacode' }}
+          HEALTH_URL: ${{ secrets.PROD_HEALTH_URL || 'http://127.0.0.1:4000/api/health' }}
+          DEPLOY_MODE: ${{ secrets.DEPLOY_MODE || 'auto' }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "⚠️ Секреты SSH_HOST / SSH_PRIVATE_KEY ещё не добавлены в GitHub Secrets. Автодеплой на production пропущен."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            "${SSH_USER}@${SSH_HOST}" \
+            "APP_DIR='${APP_DIR}' BRANCH='main' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' DEPLOY_MODE='${DEPLOY_MODE}' bash -s" < deploy/remote-deploy.sh
+
+      - name: Notify Production Deploy Result
+        if: always()
+        run: node scripts/ci-notify.mjs
+        env:
+          CI_STATUS: ${{ job.status }}
+          CI_STAGE: "Production Deploy (kaiton.ru)"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}

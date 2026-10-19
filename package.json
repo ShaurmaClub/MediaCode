@@ -13,6 +13,10 @@
     "create-admin": "node server/create-admin.js",
     "reset-production-data": "node server/reset-production-data.js",
     "test": "node --test",
+    "test:security": "node scripts/ci-security-check.mjs",
+    "test:dist": "node scripts/ci-security-check.mjs --verify-dist",
+    "test:e2e": "playwright test",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "lint": "eslint .",
     "backup": "node server/backup.js"
   },
