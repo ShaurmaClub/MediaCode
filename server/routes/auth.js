@@ -1,20 +1,85 @@
 import app from '../app.js';
 import bcrypt from 'bcryptjs';
-import db from '../db.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import db, { getSchemaState } from '../db.js';
 import { validateMaxInitData, getMaxConfig } from '../max.js';
-import { authIpLimiter, authLimiter, auth, safeUser, audit, createNotification, normalizeRussianPhone, revokeUserSessions, MEDIACODE_CONSENT_VERSION } from '../lib/shared.js';
+import { authIpLimiter, authLimiter, auth, safeUser, audit, createNotification, normalizeRussianPhone, revokeUserSessions, MEDIACODE_CONSENT_VERSION, isProduction } from '../lib/shared.js';
 
 // ==========================================
-// AUTH ROUTES
+// AUTH & HEALTH ROUTES
 // ==========================================
 
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-not-a-real-password', 10);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, '../..');
+
+function getReleaseInfo() {
+  let meta = {};
+  try {
+    const metaPath = path.join(rootDir, '.release-meta.json');
+    if (fs.existsSync(metaPath)) {
+      meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    }
+  } catch {
+    // ignore invalid meta file
+  }
+  return {
+    commit: process.env.APP_COMMIT_SHA || process.env.GIT_SHA || meta.sha || 'local',
+    environment: process.env.APP_ENV || meta.env || process.env.NODE_ENV || 'development',
+    deployedAt: meta.deployedAt || null
+  };
+}
+
+function buildHealthPayload() {
+  db.prepare('SELECT 1').get();
+  const schema = getSchemaState(db);
+  const distIndex = path.join(rootDir, 'dist', 'index.html');
+  const frontendReady = fs.existsSync(distIndex);
+  const release = getReleaseInfo();
+  const ok = Boolean(schema.compatible && (!isProduction || frontendReady));
+
+  return {
+    ok,
+    db: 'ok',
+    schemaVersion: schema.schemaVersion,
+    expectedSchemaVersion: schema.expectedSchemaVersion,
+    schemaCompatible: schema.compatible,
+    frontendReady,
+    commit: release.commit,
+    environment: release.environment,
+    deployedAt: release.deployedAt,
+    uptime: Math.round(process.uptime()),
+    timestamp: new Date().toISOString()
+  };
+}
+
+app.get('/api/health/live', (req, res) => {
+  res.json({ ok: true, status: 'alive', uptime: Math.round(process.uptime()), timestamp: new Date().toISOString() });
+});
+
+app.get('/api/health/ready', (req, res) => {
+  try {
+    const payload = buildHealthPayload();
+    if (!payload.ok || !payload.frontendReady) {
+      return res.status(503).json({ ...payload, ok: false });
+    }
+    res.json(payload);
+  } catch (err) {
+    console.error('Readiness check failed:', err.message);
+    res.status(503).json({ ok: false, db: 'error', timestamp: new Date().toISOString() });
+  }
+});
 
 app.get('/api/health', (req, res) => {
-  // Реальная проверка БД: при недоступной базе отвечаем 503, чтобы мониторинг/прокси это заметили
+  // Реальная проверка БД и совместимости схемы: при недоступной базе отвечаем 503
   try {
-    db.prepare('SELECT 1').get();
-    res.json({ ok: true, db: 'ok', uptime: Math.round(process.uptime()), timestamp: new Date().toISOString() });
+    const payload = buildHealthPayload();
+    if (!payload.ok) {
+      return res.status(503).json(payload);
+    }
+    res.json(payload);
   } catch (err) {
     console.error('Health check failed:', err.message);
     res.status(503).json({ ok: false, db: 'error', timestamp: new Date().toISOString() });

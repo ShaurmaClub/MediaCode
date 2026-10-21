@@ -1,130 +1,365 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# МедиаКод — Безопасный транзакционный скрипт деплоя на Ubuntu 24.04 (SSH)
-# Поддерживает два режима запуска (переменная DEPLOY_MODE):
-#   - systemd : классический деплой (npm ci -> npm run build -> systemctl restart)
-#   - docker  : контейнерный деплой (docker compose up -d --build)
-#   - auto    : автоопределение (если активен systemd-юнит — systemd, иначе docker)
+# МедиаКод — Release-Based CD Script для Ubuntu Server 24.04 LTS
 #
-# Включает:
-#   1. Защиту от параллельного запуска (flock)
-#   2. Автоматический онлайн-бэкап SQLite перед обновлением
-#   3. Проверку /api/health после рестарта
-#   4. Автоматический откат (Rollback) на предыдущий коммит при сбое healthcheck
+# Коды возврата (для точной диагностики в GitHub Actions и уведомлениях):
+#   0  — Успешное обновление и прохождение всех 7 проверок работоспособности
+#   10 — Ошибка входных параметров или блокировки параллельного деплоя
+#   20 — Ошибка обязательного pre-deploy бэкапа (деплой заблокирован до изменений)
+#   21 — Ошибка подготовки релиза / зависимостей / миграции (активный релиз не затронут)
+#   30 — Сбой новой версии -> АВТОМАТИЧЕСКИЙ ROLLBACK ВЫПОЛНЕН УСПЕШНО
+#   31 — КРИТИЧЕСКИЙ ИНЦИДЕНТ: Сбой новой версии И сбой автоматического Rollback
 # ==============================================================================
 
-set -euo pipefail
+set -u
+set -o pipefail
 
-APP_DIR="${APP_DIR:-/var/www/mediacode}"
-BRANCH="${BRANCH:-main}"
-SERVICE_NAME="${SERVICE_NAME:-mediacode}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:4000/api/health}"
-DEPLOY_MODE="${DEPLOY_MODE:-auto}"
-LOCK_FILE="/tmp/mediacode-deploy-${SERVICE_NAME}.lock"
+DEPLOY_ENV="${DEPLOY_ENV:-}"
+TARGET_SHA="${TARGET_SHA:-}"
+REPO_URL="${REPO_URL:-https://github.com/ShaurmaClub/MediaCode.git}"
+BASE_OPT_DIR="${BASE_OPT_DIR:-/opt/mediacode}"
+BASE_DATA_DIR="${BASE_DATA_DIR:-/var/lib/mediacode}"
+DIST_ARCHIVE="${DIST_ARCHIVE:-}"
+KEEP_RELEASES="${KEEP_RELEASES:-5}"
+
+if [ "$DEPLOY_ENV" != "production" ] && [ "$DEPLOY_ENV" != "staging" ]; then
+  echo "❌ [DEPLOY] DEPLOY_ENV должен быть 'production' или 'staging' (получено: '${DEPLOY_ENV}')"
+  exit 10
+fi
+
+if ! echo "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+  echo "❌ [DEPLOY] TARGET_SHA должен быть полным 40-символьным SHA коммита, прошедшего CI (получено: '${TARGET_SHA}')"
+  exit 10
+fi
+
+if [ "$DEPLOY_ENV" = "production" ]; then
+  SERVICE_NAME="${SERVICE_NAME:-mediacode-prod}"
+  APP_PORT="${APP_PORT:-4000}"
+else
+  SERVICE_NAME="${SERVICE_NAME:-mediacode-stage}"
+  APP_PORT="${APP_PORT:-4001}"
+fi
+
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${APP_PORT}/api/health/ready}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:${APP_PORT}}"
+ENV_ROOT="${BASE_OPT_DIR}/${DEPLOY_ENV}"
+RELEASES_DIR="${ENV_ROOT}/releases"
+REPO_CACHE_DIR="${ENV_ROOT}/repo"
+CURRENT_LINK="${ENV_ROOT}/current"
+PREVIOUS_LINK="${ENV_ROOT}/previous"
+STATE_DIR="${BASE_DATA_DIR}/${DEPLOY_ENV}"
+ENV_FILE="${STATE_DIR}/.env"
+LOCK_FILE="/tmp/mediacode-deploy-${DEPLOY_ENV}.lock"
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "❌ [DEPLOY] Другой процесс деплоя уже выполняется (${LOCK_FILE}). Выход."
-  exit 1
+  echo "❌ [DEPLOY] Другой процесс деплоя для '${DEPLOY_ENV}' уже выполняется (${LOCK_FILE})."
+  exit 10
 fi
 
-echo "========================================================"
-echo "🚀 Старт деплоя МедиаКод"
-echo "   Каталог:  ${APP_DIR}"
-echo "   Ветка:    ${BRANCH}"
-echo "   Сервис:   ${SERVICE_NAME}"
-echo "   Режим:    ${DEPLOY_MODE}"
-echo "========================================================"
+echo "=================================================================="
+echo "🚀 Старт Release-Based деплоя МедиаКод"
+echo "   Окружение:    ${DEPLOY_ENV}"
+echo "   Целевой SHA:  ${TARGET_SHA}"
+echo "   Сервис:       ${SERVICE_NAME} (порт ${APP_PORT})"
+echo "   Каталог:      ${ENV_ROOT}"
+echo "   Данные:       ${STATE_DIR}"
+echo "=================================================================="
 
-if [ ! -d "$APP_DIR/.git" ]; then
-  echo "❌ [DEPLOY] Каталог ${APP_DIR} не содержит git-репозиторий!"
-  exit 1
+if [ ! -f "$ENV_FILE" ]; then
+  echo "❌ [DEPLOY] Не найден файл окружения ${ENV_FILE}. Сначала выполните установку сервера (deploy/install.sh)."
+  exit 10
 fi
 
-cd "$APP_DIR"
-
-# Определяем режим работы (systemd или docker)
-if [ "$DEPLOY_MODE" = "auto" ]; then
-  if systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1 && systemctl is-enabled "${SERVICE_NAME}.service" >/dev/null 2>&1; then
-    DEPLOY_MODE="systemd"
-  elif command -v docker >/dev/null 2>&1 && [ -f "docker-compose.yml" ] && docker compose ps -q 2>/dev/null | grep -q .; then
-    DEPLOY_MODE="docker"
-  else
-    DEPLOY_MODE="systemd"
-  fi
-  echo "ℹ️ [DEPLOY] Автоопределён режим: ${DEPLOY_MODE}"
-fi
-
-PREV_COMMIT="$(git rev-parse HEAD)"
-echo "📌 Текущий коммит (точка отката): ${PREV_COMMIT}"
-
-# 1. Резервное копирование базы данных перед деплоем
-echo "💾 Шаг 1/5: Создание резервной копии SQLite..."
-if [ "$DEPLOY_MODE" = "docker" ]; then
-  docker compose exec -T mediacode npm run backup || echo "⚠️ Контейнер ещё не запущен, пропуск pre-deploy бэкапа"
-else
-  if [ -f "server/backup.js" ] && [ -d "node_modules" ]; then
-    npm run backup || echo "⚠️ Не удалось выполнить бэкап (возможно, БД ещё не создана)"
-  fi
-fi
-
-# 2. Обновление кода из Git
-echo "📥 Шаг 2/5: Получение свежего кода из origin/${BRANCH}..."
-git fetch --prune origin "$BRANCH"
-git reset --hard "origin/${BRANCH}"
-NEW_COMMIT="$(git rev-parse HEAD)"
-echo "✅ Обновлено до коммита: ${NEW_COMMIT}"
-
-# Функция сборки и перезапуска сервиса
-build_and_restart() {
-  if [ "$DEPLOY_MODE" = "docker" ]; then
-    echo "🐳 Сборка и перезапуск Docker Compose..."
-    docker compose up -d --build --remove-orphans
-  else
-    echo "📦 Установка зависимостей (npm ci) и сборка фронтенда (vite build)..."
-    npm ci --no-audit --no-fund
-    npm run build
-    echo "🔄 Перезапуск systemd-сервиса ${SERVICE_NAME}..."
-    sudo -n systemctl restart "$SERVICE_NAME"
-  fi
+mkdir -p "$RELEASES_DIR" "${STATE_DIR}/data/backups" "${STATE_DIR}/uploads/recruitment" || {
+  echo "❌ [DEPLOY] Не удалось подготовить рабочие каталоги в ${ENV_ROOT} / ${STATE_DIR}"
+  exit 10
 }
 
-# Функция проверки /api/health
-check_health() {
+PREV_RELEASE_DIR=""
+PREV_SHA=""
+if [ -L "$CURRENT_LINK" ] && [ -d "$CURRENT_LINK" ]; then
+  PREV_RELEASE_DIR="$(readlink -f "$CURRENT_LINK")"
+  PREV_SHA="$(basename "$PREV_RELEASE_DIR")"
+  echo "📌 Текущий активный релиз: ${PREV_SHA} (${PREV_RELEASE_DIR})"
+else
+  echo "ℹ️ Активный релиз ещё не установлен (первичное развёртывание)."
+fi
+
+# ==============================================================================
+# ШАГ 1. ОБЯЗАТЕЛЬНЫЙ PRE-DEPLOY BACKUP
+# ==============================================================================
+if [ -n "$PREV_RELEASE_DIR" ] && [ -f "${STATE_DIR}/data/media.db" ]; then
+  echo "💾 Шаг 1/6: Создание предрелизной резервной копии БД и загрузок..."
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+    export APP_ENV="$DEPLOY_ENV"
+    export APP_COMMIT_SHA="$PREV_SHA"
+    cd "$PREV_RELEASE_DIR" && node server/backup.js --with-uploads --reason=pre-deploy
+  )
+  BACKUP_RC=$?
+  if [ "$BACKUP_RC" -ne 0 ]; then
+    echo "❌ [DEPLOY] Предрелизное резервное копирование завершилось с ошибкой (код ${BACKUP_RC})!"
+    echo "🛑 Деплой в '${DEPLOY_ENV}' заблокирован. Текущий релиз (${PREV_SHA}) продолжает работу без изменений."
+    exit 20
+  fi
+else
+  echo "ℹ️ Шаг 1/6: База данных ещё не создана, предрелизный бэкап пропущен."
+fi
+
+# ==============================================================================
+# ШАГ 2. ПОДГОТОВКА ИЗОЛИРОВАННОГО РЕЛИЗА releases/<TARGET_SHA>
+# ==============================================================================
+NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
+STAGE_BUILD_DIR="${RELEASES_DIR}/.${TARGET_SHA}.tmp.$$"
+
+cleanup_tmp() {
+  if [ -d "$STAGE_BUILD_DIR" ]; then
+    rm -rf "$STAGE_BUILD_DIR"
+  fi
+  if [ -n "$DIST_ARCHIVE" ] && [ -f "$DIST_ARCHIVE" ]; then
+    rm -f "$DIST_ARCHIVE"
+  fi
+}
+trap cleanup_tmp EXIT
+
+prepare_isolated_release() {
+  echo "📥 Шаг 2/6: Получение точного коммита ${TARGET_SHA}..."
+  if [ ! -d "${REPO_CACHE_DIR}/.git" ]; then
+    git clone --no-checkout "$REPO_URL" "$REPO_CACHE_DIR" || return 1
+  fi
+
+  git -C "$REPO_CACHE_DIR" remote set-url origin "$REPO_URL" || return 1
+  git -C "$REPO_CACHE_DIR" fetch --prune origin "+refs/heads/*:refs/remotes/origin/*" || return 1
+  git -C "$REPO_CACHE_DIR" fetch origin "$TARGET_SHA" || true
+
+  if ! git -C "$REPO_CACHE_DIR" cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+    echo "❌ [DEPLOY] Коммит ${TARGET_SHA} не найден в репозитории!"
+    return 1
+  fi
+
+  rm -rf "$STAGE_BUILD_DIR" || return 1
+  mkdir -p "$STAGE_BUILD_DIR" || return 1
+  git -C "$REPO_CACHE_DIR" archive "$TARGET_SHA" | tar -x -C "$STAGE_BUILD_DIR" || return 1
+
+  echo "📦 Шаг 3/6: Установка зависимостей по package-lock.json и подготовка бандла..."
+  if [ -n "$DIST_ARCHIVE" ] && [ -f "$DIST_ARCHIVE" ]; then
+    echo "   Используется проверенный в CI артефакт фронтенда: ${DIST_ARCHIVE}"
+    mkdir -p "${STAGE_BUILD_DIR}/dist" || return 1
+    tar -xzf "$DIST_ARCHIVE" -C "${STAGE_BUILD_DIR}/dist" || return 1
+    (cd "$STAGE_BUILD_DIR" && npm ci --omit=dev --no-audit --no-fund) || return 1
+  else
+    echo "   Локальная сборка фронтенда и продакшн-зависимостей..."
+    (cd "$STAGE_BUILD_DIR" && npm ci --no-audit --no-fund) || return 1
+    (cd "$STAGE_BUILD_DIR" && npm run build) || return 1
+    (cd "$STAGE_BUILD_DIR" && npm prune --omit=dev --no-audit --no-fund) || return 1
+  fi
+
+  if [ ! -f "${STAGE_BUILD_DIR}/dist/index.html" ]; then
+    echo "❌ [DEPLOY] В собранном релизе отсутствует dist/index.html!"
+    return 1
+  fi
+
+  # Симлинки на персистентные каталоги данных и загрузок
+  rm -rf "${STAGE_BUILD_DIR}/data" "${STAGE_BUILD_DIR}/uploads" || return 1
+  ln -s "${STATE_DIR}/data" "${STAGE_BUILD_DIR}/data" || return 1
+  ln -s "${STATE_DIR}/uploads" "${STAGE_BUILD_DIR}/uploads" || return 1
+
+  cat > "${STAGE_BUILD_DIR}/.release-meta.json" <<EOF
+{
+  "sha": "${TARGET_SHA}",
+  "env": "${DEPLOY_ENV}",
+  "deployedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+
+  rm -rf "$NEW_RELEASE_DIR" || return 1
+  mv "$STAGE_BUILD_DIR" "$NEW_RELEASE_DIR" || return 1
+  return 0
+}
+
+prepare_isolated_release
+PREP_RC=$?
+if [ "$PREP_RC" -ne 0 ]; then
+  echo "❌ [DEPLOY] Ошибка подготовки изолированного релиза ${TARGET_SHA}. Текущая версия продолжает работать."
+  exit 21
+fi
+
+# ==============================================================================
+# ШАГ 4. ПРОВЕРКА И ПРИМЕНЕНИЕ МИГРАЦИЙ БД ДО ПЕРЕКЛЮЧЕНИЯ ТРАФИКА
+# ==============================================================================
+echo "🗄️ Шаг 4/6: Проверка совместимости и миграция схемы SQLite..."
+(
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  export APP_ENV="$DEPLOY_ENV"
+  export APP_COMMIT_SHA="$TARGET_SHA"
+  cd "$NEW_RELEASE_DIR" && node server/migrate.js --verify
+)
+MIGRATE_RC=$?
+if [ "$MIGRATE_RC" -ne 0 ]; then
+  echo "❌ [DEPLOY] Ошибка миграции или несовместимость схемы БД! Переключение релиза отменено."
+  rm -rf "$NEW_RELEASE_DIR"
+  exit 21
+fi
+
+# ==============================================================================
+# ШАГ 5. ПЕРЕКЛЮЧЕНИЕ АКТИВНОГО РЕЛИЗА И ПЕРЕЗАПУСК SYSTEMD
+# ==============================================================================
+echo "🔄 Шаг 5/6: Атомарное переключение current -> ${NEW_RELEASE_DIR} и перезапуск ${SERVICE_NAME}..."
+if [ -n "$PREV_RELEASE_DIR" ] && [ "$PREV_RELEASE_DIR" != "$NEW_RELEASE_DIR" ]; then
+  ln -sfn "$PREV_RELEASE_DIR" "$PREVIOUS_LINK" || {
+    echo "❌ [DEPLOY] Не удалось обновить ссылку previous"
+    exit 21
+  }
+fi
+
+ln -sfn "$NEW_RELEASE_DIR" "$CURRENT_LINK" || {
+  echo "❌ [DEPLOY] Не удалось обновить ссылку current"
+  exit 21
+}
+
+sudo -n systemctl restart "$SERVICE_NAME"
+RESTART_RC=$?
+
+# ==============================================================================
+# ФУНКЦИЯ 7-СТУПЕНЧАТОЙ ПРОВЕРКИ РАБОТОСПОСОБНОСТИ РЕЛИЗА
+# ==============================================================================
+verify_release() {
+  local expected_sha="$1"
   local retries=15
   local wait_sec=2
-  echo "🩺 Проверка работоспособности (${HEALTH_URL})..."
+
+  echo "🩺 Проверка работоспособности релиза (ожидается SHA: ${expected_sha})..."
+
   for i in $(seq 1 "$retries"); do
-    if response="$(curl -fsS --max-time 4 "$HEALTH_URL" 2>/dev/null)"; then
-      if echo "$response" | grep -q '"ok":true'; then
-        echo "✅ Сервер ответил 200 OK: ${response}"
-        return 0
+    # 1. Запущен ли systemd-сервис
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+      # 2-6. Проверка /api/health/ready (HTTP 200, db=ok, schemaCompatible=true, frontendReady=true, commit=expected_sha)
+      local health_json=""
+      if health_json="$(curl -fsS --max-time 4 "$HEALTH_URL" 2>/dev/null)"; then
+        local check_result=""
+        check_result="$(HEALTH_JSON="$health_json" EXPECTED_SHA="$expected_sha" node -e '
+          try {
+            const d = JSON.parse(process.env.HEALTH_JSON);
+            if (!d.ok) process.exit(1);
+            if (d.db !== "ok") process.exit(2);
+            if (!d.schemaCompatible) process.exit(3);
+            if (!d.frontendReady) process.exit(4);
+            if (d.commit !== process.env.EXPECTED_SHA) process.exit(5);
+            process.stdout.write("OK");
+          } catch {
+            process.exit(6);
+          }
+        ' 2>/dev/null || true)"
+
+        if [ "$check_result" = "OK" ]; then
+          # 5b. Проверка отдачи фронтенда (/)
+          if curl -fsS --max-time 4 "${BASE_URL}/" >/dev/null 2>&1; then
+            # 7. Функциональная smoke-проверка публичного API
+            if curl -fsS --max-time 4 "${BASE_URL}/api/public/recruitment/track/photo" | grep -q '"slug":"photo"'; then
+              echo "✅ Все 7 проверок работоспособности пройдены (попытка ${i}/${retries}):"
+              echo "   ${health_json}"
+              return 0
+            fi
+          fi
+        fi
       fi
     fi
-    echo "⏳ Попытка ${i}/${retries}: сервис ещё не готов, ждём ${wait_sec} сек..."
+
+    echo "⏳ Попытка ${i}/${retries}: ждём готовности сервиса (${wait_sec} сек)..."
     sleep "$wait_sec"
   done
+
+  echo "❌ Не пройдена комплексная проверка работоспособности для SHA ${expected_sha}!"
+  systemctl status "$SERVICE_NAME" --no-pager -n 20 || true
   return 1
 }
 
-# 3-4. Сборка, рестарт и проверка здоровья
-echo "⚙️ Шаг 3/5: Сборка проекта и перезапуск..."
-if build_and_restart && check_health; then
-  echo "🎉 Шаг 5/5: Деплой коммита ${NEW_COMMIT} успешно завершён!"
+if [ "$RESTART_RC" -eq 0 ]; then
+  verify_release "$TARGET_SHA"
+  VERIFY_RC=$?
+else
+  echo "❌ [DEPLOY] Команда systemctl restart ${SERVICE_NAME} завершилась с ошибкой (${RESTART_RC})!"
+  VERIFY_RC=1
+fi
+
+# ==============================================================================
+# ШАГ 6. УСПЕШНОЕ ЗАВЕРШЕНИЕ И ОЧИСТКА УСТАРЕВШИХ РЕЛИЗОВ
+# ==============================================================================
+if [ "$VERIFY_RC" -eq 0 ]; then
+  echo "🧹 Шаг 6/6: Очистка устаревших релизов (храним последние ${KEEP_RELEASES})..."
+  CURRENT_REAL="$(readlink -f "$CURRENT_LINK" || true)"
+  PREVIOUS_REAL="$(readlink -f "$PREVIOUS_LINK" || true)"
+
+  mapfile -t ALL_RELEASES < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | awk '{print $2}')
+  COUNT=0
+  for rel_path in "${ALL_RELEASES[@]}"; do
+    COUNT=$((COUNT + 1))
+    if [ "$COUNT" -le "$KEEP_RELEASES" ]; then
+      continue
+    fi
+    if [ "$rel_path" = "$CURRENT_REAL" ] || [ "$rel_path" = "$PREVIOUS_REAL" ]; then
+      continue
+    fi
+    echo "   Удаление старого релиза: $(basename "$rel_path")"
+    rm -rf "$rel_path"
+  done
+
+  echo "🎉 Деплой релиза ${TARGET_SHA} в окружение '${DEPLOY_ENV}' успешно завершён!"
   exit 0
 fi
 
-# 5. Аварийный откат (Rollback) при падении сборки или /api/health
-echo "🚨 ОШИБКА: Новая версия (${NEW_COMMIT}) не прошла проверку работоспособности!"
-echo "⏪ Выполняется автоматический откат на рабочий коммит ${PREV_COMMIT}..."
+# ==============================================================================
+# АВАРИЙНЫЙ ROLLBACK (БЕЗ ПЕРЕЗАПИСИ ПОЛЬЗОВАТЕЛЬСКИХ ДАННЫХ В БД)
+# ==============================================================================
+echo "🚨 СБОЙ ДЕПЛОЯ: Новая версия (${TARGET_SHA}) не прошла проверки работоспособности!"
 
-git reset --hard "$PREV_COMMIT"
-build_and_restart || true
-
-if check_health; then
-  echo "✅ Откат на ${PREV_COMMIT} выполнен успешно, работоспособность восстановлена."
-else
-  echo "❌ КРИТИЧЕСКАЯ ОШИБКА: После отката на ${PREV_COMMIT} сервис всё ещё не отвечает!"
+if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ]; then
+  echo "❌ Предыдущий релиз отсутствует — автоматический откат невозможен!"
+  exit 31
 fi
 
-exit 1
+echo "⏪ Запуск автоматического отката на предыдущий рабочий релиз ${PREV_SHA} (${PREV_RELEASE_DIR})..."
+echo "ℹ️ База данных SQLite и пользовательские файлы сохраняются (без разрушительного перезаписывания)."
+
+# Проверяем, совместима ли текущая схема БД с предыдущим релизом
+(
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  export APP_ENV="$DEPLOY_ENV"
+  export APP_COMMIT_SHA="$PREV_SHA"
+  cd "$PREV_RELEASE_DIR" && node server/migrate.js --verify
+)
+COMPAT_RC=$?
+if [ "$COMPAT_RC" -ne 0 ]; then
+  echo "❌ КРИТИЧЕСКАЯ ОШИБКА: Схема БД несовместима с предыдущим релизом ${PREV_SHA}!"
+  echo "   Требуется ручное восстановление по инструкции deploy/DISASTER_RECOVERY.md."
+  exit 31
+fi
+
+ln -sfn "$PREV_RELEASE_DIR" "$CURRENT_LINK"
+sudo -n systemctl restart "$SERVICE_NAME"
+RB_RESTART_RC=$?
+
+if [ "$RB_RESTART_RC" -eq 0 ]; then
+  verify_release "$PREV_SHA"
+  RB_VERIFY_RC=$?
+else
+  RB_VERIFY_RC=1
+fi
+
+if [ "$RB_VERIFY_RC" -eq 0 ]; then
+  echo "✅ АВТОМАТИЧЕСКИЙ ROLLBACK ВЫПОЛНЕН: Работа сервиса восстановлена на релизе ${PREV_SHA}."
+  exit 30
+else
+  echo "🔥 КРИТИЧЕСКИЙ ИНЦИДЕНТ: Автоматический Rollback на ${PREV_SHA} НЕ УДАЛСЯ!"
+  exit 31
+fi

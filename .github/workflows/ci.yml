@@ -7,55 +7,58 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
 jobs:
   # ============================================================================
-  # 1. БЕЗОПАСНОСТЬ, СЕКРЕТЫ И АУДИТ ПАКЕТОВ
+  # 1. БЕЗОПАСНОСТЬ, СЕКРЕТЫ, СОГЛАСОВАННОСТЬ LOCK-ФАЙЛА И АУДИТ ПАКЕТОВ
   # ============================================================================
   security-and-packages:
-    name: "🔒 Security, Secrets & Packages (Ubuntu 24.04)"
+    name: "🔒 Security, Secrets & Lockfile (Ubuntu 24.04)"
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
       - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 22
           cache: npm
 
       - name: Scan commit history for leaked secrets (Gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies strictly from lockfile (npm ci)
         run: npm ci
 
-      - name: Run internal Security & Guardrail Checks
+      - name: Run internal Security, Lockfile & SESSION_SECRET Guardrails
         run: npm run test:security
 
       - name: Audit production dependencies for High/Critical vulnerabilities
         run: npm run audit:prod
 
   # ============================================================================
-  # 2. ЛИНТЕР И ПРОДАКШН-СБОРКА БАHДЛА
+  # 2. ЛИНТЕР И ЕДИНАЯ ПРОДАКШН-СБОРКА FRONTEND-АРТЕФАКТА
   # ============================================================================
   lint-and-build:
     name: "🏗️ Lint & Production Build (Ubuntu 24.04)"
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 22
           cache: npm
@@ -69,29 +72,35 @@ jobs:
       - name: Build production frontend bundle
         run: npm run build
 
-      - name: Verify production bundle integrity & no leaked source maps
+      - name: Verify production bundle integrity & absence of source maps/secrets
         run: npm run test:dist
 
+      - name: Package verified dist.tar.gz archive for release deployment
+        run: tar -czf dist.tar.gz -C dist .
+
       - name: Upload production dist artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: mediacode-dist
-          path: dist/
+          name: mediacode-dist-${{ github.sha }}
+          path: |
+            dist/
+            dist.tar.gz
+          if-no-files-found: error
           retention-days: 7
 
   # ============================================================================
-  # 3. ИНТЕГРАЦИОННЫЕ, RBAC, SECURITY И E2E SMOKE ТЕСТЫ
+  # 3. ИНТЕГРАЦИОННЫЕ, МИГРАЦИОННЫЕ, RBAC, SECURITY И E2E SMOKE ТЕСТЫ
   # ============================================================================
   tests:
-    name: "🧪 Integration, Security & E2E Tests (Ubuntu 24.04)"
+    name: "🧪 Integration, Backup/Restore, Security & E2E Tests (Ubuntu 24.04)"
     runs-on: ubuntu-24.04
     needs: [lint-and-build]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 22
           cache: npm
@@ -99,13 +108,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download built frontend artifact (dist/)
-        uses: actions/download-artifact@v4
+      - name: Download verified frontend artifact (dist/)
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: mediacode-dist
-          path: dist/
+          name: mediacode-dist-${{ github.sha }}
+          path: .
 
-      - name: Run API, Auth, RBAC, SQLite & Security Regression Tests (52 tests)
+      - name: Run API, Auth, RBAC, Migrations, Backup/Restore & CI/CD Tests
         run: npm test
         env:
           NODE_ENV: test
@@ -126,13 +135,13 @@ jobs:
     name: "🚨 Alert on CI Failure"
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
-    if: always() && (needs.security-and-packages.result == 'failure' || needs.lint-and-build.result == 'failure' || needs.tests.result == 'failure')
+    if: always() && (needs.security-and-packages.result != 'success' || needs.lint-and-build.result != 'success' || needs.tests.result != 'success')
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 22
 
@@ -140,7 +149,9 @@ jobs:
         run: node scripts/ci-notify.mjs
         env:
           CI_STATUS: failure
-          CI_STAGE: "CI Gate (Тесты / Безопасность / Сборка)"
+          CI_EVENT_TYPE: ci-failure
+          CI_ENVIRONMENT: ci
+          CI_STAGE: "CI Gate (Безопасность / Сборка / Тесты)"
           CI_FAILED_STEPS: "Security=${{ needs.security-and-packages.result }}, Build=${{ needs.lint-and-build.result }}, Tests=${{ needs.tests.result }}"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -155,41 +166,118 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    concurrency:
+      group: deploy-staging-environment
+      cancel-in-progress: false
     environment:
       name: staging
       url: https://stage.kaiton.ru
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Deploy to Ubuntu 24.04 Staging via SSH
+      - name: Download verified frontend artifact (dist.tar.gz)
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: mediacode-dist-${{ github.sha }}
+          path: .
+
+      - name: Validate Staging Deployment Secrets
         env:
-          SSH_HOST: ${{ secrets.STAGE_SSH_HOST || secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.STAGE_SSH_USER || secrets.SSH_USER || 'deploy' }}
-          SSH_PORT: ${{ secrets.STAGE_SSH_PORT || secrets.SSH_PORT || '22' }}
-          SSH_PRIVATE_KEY: ${{ secrets.STAGE_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
-          APP_DIR: ${{ secrets.STAGE_APP_DIR || '/var/www/mediacode-stage' }}
-          SERVICE_NAME: ${{ secrets.STAGE_SERVICE_NAME || 'mediacode-stage' }}
-          HEALTH_URL: ${{ secrets.STAGE_HEALTH_URL || 'http://127.0.0.1:4001/api/health' }}
-          DEPLOY_MODE: ${{ secrets.DEPLOY_MODE || 'auto' }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
-          if [ -z "$SSH_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "⚠️ Секреты SSH_HOST / SSH_PRIVATE_KEY ещё не добавлены в GitHub Secrets. Автодеплой на staging пропущен."
-            exit 0
+          missing=()
+          [ -z "${SSH_HOST}" ] && missing+=("SSH_HOST")
+          [ -z "${SSH_PRIVATE_KEY}" ] && missing+=("SSH_PRIVATE_KEY")
+          [ -z "${SSH_KNOWN_HOSTS}" ] && missing+=("SSH_KNOWN_HOSTS")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "❌ CRITICAL: В GitHub Environment 'staging' отсутствуют обязательные секреты: ${missing[*]}" >&2
+            echo "Запустите помощник настройки: bash deploy/setup-github.sh --host <IP_СЕРВЕРА>" >&2
+            echo "Подробная инструкция: deploy/INSTALL.md" >&2
+            exit 1
           fi
+
+      - name: Release-based Deploy to Staging (Ubuntu 24.04)
+        id: deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/staging' }}
+          DATA_ROOT: "/var/lib/mediacode/staging"
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-stage' }}
+          HEALTH_URL: "http://127.0.0.1:4001/api/health/ready"
+          EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set +e
+          umask 077
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_deploy
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+
+          REMOTE_ARCHIVE="/tmp/mediacode-dist-${TARGET_SHA}.tar.gz"
+          scp -i ~/.ssh/id_deploy -P "${SSH_PORT}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=15 \
+            dist.tar.gz "${SSH_USER}@${SSH_HOST}:${REMOTE_ARCHIVE}"
+          SCP_CODE=$?
+          if [ "${SCP_CODE}" -ne 0 ]; then
+            echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
+            echo "failed_step=SCP upload of dist.tar.gz failed (code ${SCP_CODE})" >> "${GITHUB_OUTPUT}"
+            rm -f ~/.ssh/id_deploy
+            exit "${SCP_CODE}"
+          fi
+
+          ssh -i ~/.ssh/id_deploy -p "${SSH_PORT}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=15 \
             "${SSH_USER}@${SSH_HOST}" \
-            "APP_DIR='${APP_DIR}' BRANCH='dev' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' DEPLOY_MODE='${DEPLOY_MODE}' bash -s" < deploy/remote-deploy.sh
+            "DEPLOY_ENV='staging' TARGET_SHA='${TARGET_SHA}' DEPLOY_PATH='${DEPLOY_PATH}' DATA_ROOT='${DATA_ROOT}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' EXTERNAL_HEALTH_URL='${EXTERNAL_HEALTH_URL}' DIST_ARCHIVE='${REMOTE_ARCHIVE}' bash -s" < deploy/remote-deploy.sh
+          DEPLOY_CODE=$?
+          rm -f ~/.ssh/id_deploy
+
+          case "${DEPLOY_CODE}" in
+            0)
+              echo "event_type=staging-success" >> "${GITHUB_OUTPUT}"
+              ;;
+            20)
+              echo "event_type=backup-failure" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=Pre-deploy backup failed (deployment blocked)" >> "${GITHUB_OUTPUT}"
+              ;;
+            30)
+              echo "event_type=rollback-success" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=New release failed readiness verification; automatic rollback restored previous release" >> "${GITHUB_OUTPUT}"
+              ;;
+            31)
+              echo "event_type=rollback-failure" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=CRITICAL: New release failed AND automatic rollback failed" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=Remote deploy exited with code ${DEPLOY_CODE}" >> "${GITHUB_OUTPUT}"
+              ;;
+          esac
+          exit "${DEPLOY_CODE}"
 
       - name: Notify Staging Deploy Result
         if: always()
         run: node scripts/ci-notify.mjs
         env:
           CI_STATUS: ${{ job.status }}
+          CI_EVENT_TYPE: ${{ steps.deploy.outputs.event_type || (job.status == 'success' && 'staging-success' || 'cd-failure') }}
+          CI_ENVIRONMENT: staging
           CI_STAGE: "Staging Deploy (stage.kaiton.ru)"
+          CI_FAILED_STEPS: ${{ steps.deploy.outputs.failed_step || 'Secret validation or SSH connection failed' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
@@ -203,41 +291,118 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: deploy-production-environment
+      cancel-in-progress: false
     environment:
       name: production
       url: https://kaiton.ru
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Deploy to Ubuntu 24.04 Production via SSH
+      - name: Download verified frontend artifact (dist.tar.gz)
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: mediacode-dist-${{ github.sha }}
+          path: .
+
+      - name: Validate Production Deployment Secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          missing=()
+          [ -z "${SSH_HOST}" ] && missing+=("SSH_HOST")
+          [ -z "${SSH_PRIVATE_KEY}" ] && missing+=("SSH_PRIVATE_KEY")
+          [ -z "${SSH_KNOWN_HOSTS}" ] && missing+=("SSH_KNOWN_HOSTS")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "❌ CRITICAL: В GitHub Environment 'production' отсутствуют обязательные секреты: ${missing[*]}" >&2
+            echo "Запустите помощник настройки: bash deploy/setup-github.sh --host <IP_СЕРВЕРА>" >&2
+            echo "Подробная инструкция: deploy/INSTALL.md" >&2
+            exit 1
+          fi
+
+      - name: Release-based Deploy to Production (Ubuntu 24.04)
+        id: deploy
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          APP_DIR: ${{ secrets.PROD_APP_DIR || '/var/www/mediacode' }}
-          SERVICE_NAME: ${{ secrets.PROD_SERVICE_NAME || 'mediacode' }}
-          HEALTH_URL: ${{ secrets.PROD_HEALTH_URL || 'http://127.0.0.1:4000/api/health' }}
-          DEPLOY_MODE: ${{ secrets.DEPLOY_MODE || 'auto' }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/production' }}
+          DATA_ROOT: "/var/lib/mediacode/production"
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-prod' }}
+          HEALTH_URL: "http://127.0.0.1:4000/api/health/ready"
+          EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
-          if [ -z "$SSH_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "⚠️ Секреты SSH_HOST / SSH_PRIVATE_KEY ещё не добавлены в GitHub Secrets. Автодеплой на production пропущен."
-            exit 0
-          fi
+          set +e
+          umask 077
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_deploy
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+
+          REMOTE_ARCHIVE="/tmp/mediacode-dist-${TARGET_SHA}.tar.gz"
+          scp -i ~/.ssh/id_deploy -P "${SSH_PORT}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=15 \
+            dist.tar.gz "${SSH_USER}@${SSH_HOST}:${REMOTE_ARCHIVE}"
+          SCP_CODE=$?
+          if [ "${SCP_CODE}" -ne 0 ]; then
+            echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
+            echo "failed_step=SCP upload of dist.tar.gz failed (code ${SCP_CODE})" >> "${GITHUB_OUTPUT}"
+            rm -f ~/.ssh/id_deploy
+            exit "${SCP_CODE}"
+          fi
+
+          ssh -i ~/.ssh/id_deploy -p "${SSH_PORT}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=15 \
             "${SSH_USER}@${SSH_HOST}" \
-            "APP_DIR='${APP_DIR}' BRANCH='main' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' DEPLOY_MODE='${DEPLOY_MODE}' bash -s" < deploy/remote-deploy.sh
+            "DEPLOY_ENV='production' TARGET_SHA='${TARGET_SHA}' DEPLOY_PATH='${DEPLOY_PATH}' DATA_ROOT='${DATA_ROOT}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' EXTERNAL_HEALTH_URL='${EXTERNAL_HEALTH_URL}' DIST_ARCHIVE='${REMOTE_ARCHIVE}' bash -s" < deploy/remote-deploy.sh
+          DEPLOY_CODE=$?
+          rm -f ~/.ssh/id_deploy
+
+          case "${DEPLOY_CODE}" in
+            0)
+              echo "event_type=production-success" >> "${GITHUB_OUTPUT}"
+              ;;
+            20)
+              echo "event_type=backup-failure" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=Pre-deploy backup failed (deployment blocked)" >> "${GITHUB_OUTPUT}"
+              ;;
+            30)
+              echo "event_type=rollback-success" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=New release failed readiness verification; automatic rollback restored previous release" >> "${GITHUB_OUTPUT}"
+              ;;
+            31)
+              echo "event_type=rollback-failure" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=CRITICAL: New release failed AND automatic rollback failed" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
+              echo "failed_step=Remote deploy exited with code ${DEPLOY_CODE}" >> "${GITHUB_OUTPUT}"
+              ;;
+          esac
+          exit "${DEPLOY_CODE}"
 
       - name: Notify Production Deploy Result
         if: always()
         run: node scripts/ci-notify.mjs
         env:
           CI_STATUS: ${{ job.status }}
+          CI_EVENT_TYPE: ${{ steps.deploy.outputs.event_type || (job.status == 'success' && 'production-success' || 'cd-failure') }}
+          CI_ENVIRONMENT: production
           CI_STAGE: "Production Deploy (kaiton.ru)"
+          CI_FAILED_STEPS: ${{ steps.deploy.outputs.failed_step || 'Secret validation or SSH connection failed' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}

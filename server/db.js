@@ -385,16 +385,93 @@ db.exec(`
   );
 `);
 
-try {
-  db.prepare('SELECT activation_token FROM users LIMIT 1').get();
-} catch(e) {
-  db.exec('ALTER TABLE users ADD COLUMN activation_token TEXT;');
-}
+ensureColumn('users', 'activation_token', 'TEXT');
+ensureColumn('recruitment_applications', 'admin_resubmission_allowed', 'INTEGER DEFAULT 0');
 
-try {
-  db.prepare('SELECT admin_resubmission_allowed FROM recruitment_applications LIMIT 1').get();
-} catch(e) {
-  db.exec('ALTER TABLE recruitment_applications ADD COLUMN admin_resubmission_allowed INTEGER DEFAULT 0;');
+// ==========================================
+// SCHEMA VERSIONING & MIGRATION LEDGER
+// ==========================================
+export const SCHEMA_VERSION = 3;
+export const MIN_COMPATIBLE_SCHEMA_VERSION = 2;
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    backward_compatible INTEGER NOT NULL DEFAULT 1,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+const ORDERED_MIGRATIONS = [
+  { version: 1, name: 'v1_initial_core_tables', backwardCompatible: 1 },
+  { version: 2, name: 'v2_consent_max_and_completion_triggers', backwardCompatible: 1 },
+  { version: 3, name: 'v3_application_versions_and_resubmission', backwardCompatible: 1 }
+];
+
+const applyVersionLedger = db.transaction(() => {
+  const insMigration = db.prepare(`
+    INSERT INTO schema_migrations (version, name, backward_compatible)
+    VALUES (?, ?, ?)
+    ON CONFLICT(version) DO NOTHING
+  `);
+  for (const m of ORDERED_MIGRATIONS) {
+    insMigration.run(m.version, m.name, m.backwardCompatible);
+  }
+  const currentPragma = Number(db.pragma('user_version', { simple: true }) || 0);
+  if (currentPragma < SCHEMA_VERSION) {
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  }
+});
+applyVersionLedger();
+
+export function getSchemaState(targetDb = db) {
+  const requiredTables = [
+    'users',
+    'tasks',
+    'applications',
+    'application_versions',
+    'points',
+    'notifications',
+    'audit_logs',
+    'recruitment_tracks',
+    'recruitment_applications',
+    'schema_migrations'
+  ];
+  const existing = new Set(
+    targetDb
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((r) => r.name)
+  );
+  const missingTables = requiredTables.filter((t) => !existing.has(t));
+  const userVersion = Number(targetDb.pragma('user_version', { simple: true }) || 0);
+  const migrations = existing.has('schema_migrations')
+    ? targetDb.prepare('SELECT version, name, backward_compatible, applied_at FROM schema_migrations ORDER BY version ASC').all()
+    : [];
+  const latestMigration = migrations.length ? migrations[migrations.length - 1].version : 0;
+  const effectiveVersion = Math.max(userVersion, latestMigration);
+
+  const futureMigrations = migrations.filter((m) => m.version > SCHEMA_VERSION);
+  const futureIncompatible =
+    futureMigrations.some((m) => Number(m.backward_compatible) === 0) ||
+    (userVersion > SCHEMA_VERSION && futureMigrations.length === 0);
+  const compatible =
+    missingTables.length === 0 &&
+    effectiveVersion >= MIN_COMPATIBLE_SCHEMA_VERSION &&
+    !futureIncompatible;
+
+  return {
+    ok: compatible,
+    schemaVersion: effectiveVersion,
+    currentVersion: effectiveVersion,
+    expectedSchemaVersion: SCHEMA_VERSION,
+    minCompatibleVersion: MIN_COMPATIBLE_SCHEMA_VERSION,
+    compatible,
+    missingTables,
+    migrationsCount: migrations.length,
+    appliedMigrations: migrations
+  };
 }
 // END MIGRATIONS BLOCK
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=MediaCode Daily Backup (Production & Staging)
+After=network.target
+
+[Service]
+Type=oneshot
+User=mediacode
+Group=mediacode
+ExecStart=/bin/bash -c 'set -e; for env in production staging; do if [ -d "/opt/mediacode/$env/current" ] && [ -f "/var/lib/mediacode/$env/data/media.db" ]; then set -a; source "/var/lib/mediacode/$env/.env"; set +a; cd "/opt/mediacode/$env/current" && node server/backup.js --with-uploads --reason=daily-timer; fi; done'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacode-backup

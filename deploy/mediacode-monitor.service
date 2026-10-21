@@ -1,0 +1,11 @@
+[Unit]
+Description=MediaCode Health & Infrastructure Monitor
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/bin/bash -c '/opt/mediacode/production/current/deploy/health-monitor.sh'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacode-monitor

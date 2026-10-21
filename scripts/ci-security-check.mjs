@@ -2,11 +2,11 @@
 /**
  * CI Security, Package & Build Integrity Gate
  * Проверяет:
- * 1. Отсутствие в git-индексе запрещённых файлов (.env, *.db, *.pem, *.key, архивов)
+ * 1. Отсутствие в git-индексе запрещённых файлов (.env, *.db, *.pem, *.key, id_rsa)
  * 2. Отсутствие утекших приватных ключей и токенов в исходном коде
- * 3. Целостность package.json / package-lock.json и наличие защитных пакетов
- * 4. Обязательную блокировку запуска сервера в NODE_ENV=production со слабым SESSION_SECRET
- * 5. При флаге --verify-dist: корректность продакшн-бандла dist/ и отсутствие .map файлов
+ * 3. Согласованность package.json и package-lock.json + наличие защитных пакетов
+ * 4. Точную проверку блокировки старта сервера в NODE_ENV=production со слабым SESSION_SECRET
+ * 5. При флаге --verify-dist: целостность dist/, отсутствие .map и отсутствие утечек секретов в бандл
  */
 
 import fs from 'fs';
@@ -29,6 +29,13 @@ function fail(msg) {
   failures += 1;
 }
 
+const SECRET_REGEXES = [
+  { name: 'Private Key Header', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/ },
+  { name: 'GitHub PAT Token', re: /\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/ },
+  { name: 'AWS Access Key', re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: 'Telegram Bot Token', re: /\b\d{8,10}:AA[A-Za-z0-9_-]{33}\b/ }
+];
+
 function checkTrackedFilesAndSecrets() {
   let trackedFiles = [];
   try {
@@ -39,7 +46,6 @@ function checkTrackedFilesAndSecrets() {
     return;
   }
 
-  // 1. Запрещённые файлы в репозитории
   const forbiddenPatterns = [
     { re: /(^|\/)\.env(\..+)?$/, allow: /(^|\/)\.env\.example$/, reason: 'Файл переменных окружения (.env)' },
     { re: /\.(db|sqlite|sqlite3)(-shm|-wal)?$/i, reason: 'Дамп базы данных SQLite' },
@@ -59,15 +65,7 @@ function checkTrackedFilesAndSecrets() {
     pass(`Проверено ${trackedFiles.length} файлов в git: секретных .env, .db и приватных ключей не обнаружено`);
   }
 
-  // 2. Поиск захардкоженных секретов/токенов в исходниках
-  const secretRegexes = [
-    { name: 'Private Key Header', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/ },
-    { name: 'GitHub PAT Token', re: /\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/ },
-    { name: 'AWS Access Key', re: /\bAKIA[0-9A-Z]{16}\b/ },
-    { name: 'Telegram Bot Token', re: /\b\d{8,10}:AA[A-Za-z0-9_-]{33}\b/ }
-  ];
-
-  const scannableExts = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.json', '.yml', '.yaml', '.sh']);
+  const scannableExts = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.json', '.yml', '.yaml', '.sh', '.conf', '.service']);
   let scannedCount = 0;
 
   for (const relFile of trackedFiles) {
@@ -78,7 +76,7 @@ function checkTrackedFilesAndSecrets() {
     const content = fs.readFileSync(absPath, 'utf8');
     scannedCount += 1;
 
-    for (const pattern of secretRegexes) {
+    for (const pattern of SECRET_REGEXES) {
       if (pattern.re.test(content)) {
         fail(`Обнаружен подозрительный паттерн (${pattern.name}) в файле ${relFile}`);
       }
@@ -90,7 +88,7 @@ function checkTrackedFilesAndSecrets() {
   }
 }
 
-function checkPackageIntegrity() {
+function checkPackageAndLockfileIntegrity() {
   const pkgPath = path.join(rootDir, 'package.json');
   const lockPath = path.join(rootDir, 'package-lock.json');
 
@@ -111,15 +109,35 @@ function checkPackageIntegrity() {
 
   if (!lock.lockfileVersion || lock.lockfileVersion < 2) {
     fail(`Устаревший формат package-lock.json (lockfileVersion=${lock.lockfileVersion})`);
+    return;
+  }
+
+  // Проверяем согласованность спецификаторов зависимостей между package.json и package-lock.json (packages[""])
+  const rootLockPkg = lock.packages && lock.packages[''];
+  if (!rootLockPkg) {
+    fail('В package-lock.json отсутствует корневой блок packages[""]');
+    return;
+  }
+
+  const allDeclaredDeps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  const allLockedDeps = { ...(rootLockPkg.dependencies || {}), ...(rootLockPkg.devDependencies || {}) };
+
+  for (const [depName, depRange] of Object.entries(allDeclaredDeps)) {
+    if (allLockedDeps[depName] !== depRange) {
+      fail(`Рассинхронизация lock-файла для пакета "${depName}": в package.json="${depRange}", в package-lock.json="${allLockedDeps[depName]}"`);
+    }
+    if (!lock.packages[`node_modules/${depName}`]) {
+      fail(`Пакет "${depName}" отсутствует в дереве node_modules внутри package-lock.json`);
+    }
   }
 
   if (failures === 0) {
-    pass('Целостность package.json, package-lock.json и защитных пакетов (helmet, rate-limit, bcryptjs, zod) подтверждена');
+    pass('Согласованность package.json и package-lock.json, а также защитных пакетов (helmet, rate-limit, bcryptjs, zod) подтверждена');
   }
 }
 
 function checkProductionSecretGuardrail() {
-  // Проверяем, что в NODE_ENV=production сервер отказывается стартовать со слабым SESSION_SECRET
+  // Проверяем не просто ненулевой код выхода, а именно штатное срабатывание защиты SESSION_SECRET
   const probe = spawnSync(
     process.execPath,
     ['-e', "import('./server/app.js')"],
@@ -135,10 +153,17 @@ function checkProductionSecretGuardrail() {
     }
   );
 
+  const expectedErrorSubstring = 'CRITICAL ERROR: В режиме production переменная окружения SESSION_SECRET обязательна';
+  const combinedOutput = `${probe.stdout || ''}\n${probe.stderr || ''}`;
+
   if (probe.status === 0) {
     fail('КРИТИЧЕСКАЯ ОШИБКА: сервер запустился в NODE_ENV=production с небезопасным SESSION_SECRET!');
+  } else if (!combinedOutput.includes(expectedErrorSubstring)) {
+    fail(
+      `Проверка SESSION_SECRET завершилась с кодом ${probe.status}, но без ожидаемого сообщения защиты! Вывод: ${combinedOutput.trim()}`
+    );
   } else {
-    pass('Защита production-контура активна: сервер блокирует запуск при слабом или дефолтном SESSION_SECRET');
+    pass('Защита production-контура проверена: сервер блокирует старт со слабым SESSION_SECRET с точным сообщением ошибки');
   }
 }
 
@@ -168,17 +193,32 @@ function checkDistBuild() {
     fail('В продакшн-сборке dist/assets обнаружены source-map файлы (*.map)');
   }
 
+  // Сканируем собранные ассеты на случайное попадание серверных секретов/ключей
+  for (const f of assetFiles) {
+    if (!f.endsWith('.js') && !f.endsWith('.css') && !f.endsWith('.html')) continue;
+    const content = fs.readFileSync(path.join(assetsDir, f), 'utf8');
+    for (const pattern of SECRET_REGEXES) {
+      if (pattern.re.test(content)) {
+        fail(`В клиентском бандле dist/assets/${f} обнаружен секрет (${pattern.name})!`);
+      }
+    }
+  }
+
   if (failures === 0) {
-    pass(`Продакшн-бандл dist/ проверен (${assetFiles.length} ассетов, source-map отсутствуют)`);
+    pass(`Продакшн-бандл dist/ проверен (${assetFiles.length} ассетов, source-map и утечки секретов отсутствуют)`);
   }
 }
 
-if (verifyDistOnly) {
-  checkDistBuild();
-} else {
-  checkTrackedFilesAndSecrets();
-  checkPackageIntegrity();
-  checkProductionSecretGuardrail();
+try {
+  if (verifyDistOnly) {
+    checkDistBuild();
+  } else {
+    checkTrackedFilesAndSecrets();
+    checkPackageAndLockfileIntegrity();
+    checkProductionSecretGuardrail();
+  }
+} catch (err) {
+  fail(`Непредвиденная ошибка выполнения проверки безопасности: ${err.message}`);
 }
 
 if (failures > 0) {
