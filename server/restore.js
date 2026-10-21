@@ -15,8 +15,15 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
-import { SCHEMA_VERSION, MIN_COMPATIBLE_SCHEMA_VERSION } from './db.js';
+import { SCHEMA_VERSION, MIN_COMPATIBLE_SCHEMA_VERSION } from './config/schema.js';
+
+if (process.env.ENV_FILE && fs.existsSync(process.env.ENV_FILE)) {
+  dotenv.config({ path: process.env.ENV_FILE, quiet: true });
+} else {
+  dotenv.config({ quiet: true });
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -218,6 +225,18 @@ export function performRestore(options = {}) {
   const resolvedDbPath = path.resolve(targetDbPath);
   const resolvedUploadDir = path.resolve(targetUploadDir);
   fs.mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
+
+  // Если передан открытый дескриптор БД, корректно сбрасываем WAL и закрываем соединение перед заменой файла
+  if (options.db && typeof options.db.close === 'function') {
+    try {
+      if (options.db.open) {
+        options.db.pragma('wal_checkpoint(TRUNCATE)');
+        options.db.close();
+      }
+    } catch {
+      // ignore if already closed
+    }
+  }
 
   // Удаляем старые WAL/SHM файлы перед заменой файла БД
   for (const suffix of ['-wal', '-shm']) {

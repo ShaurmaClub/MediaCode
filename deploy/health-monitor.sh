@@ -7,7 +7,7 @@
 #   3. Базы данных и схемы SQLite (DB_ERROR / SCHEMA_MISMATCH)
 #   4. Прокси Nginx (PROXY_ERROR)
 #   5. SSL-сертификата Let's Encrypt (SSL_EXPIRING)
-#   6. Актуальности резервных копий (BACKUP_STALE)
+#   6. Актуальности и целостности резервных копий (BACKUP_STALE / BACKUP_CORRUPT)
 # ==============================================================================
 
 set -u
@@ -21,15 +21,25 @@ STATE_FILE="/tmp/mediacode-monitor-${CHECK_ENV}.state"
 
 if [ "$CHECK_ENV" = "production" ]; then
   SERVICE_NAME="${SERVICE_NAME:-mediacode-prod}"
+  RUNTIME_USER="${RUNTIME_USER:-mediacode-prod}"
   APP_PORT="${APP_PORT:-4000}"
 else
   SERVICE_NAME="${SERVICE_NAME:-mediacode-stage}"
+  RUNTIME_USER="${RUNTIME_USER:-mediacode-stage}"
   APP_PORT="${APP_PORT:-4001}"
 fi
 
 CURRENT_DIR="${BASE_OPT_DIR}/${CHECK_ENV}/current"
 ENV_FILE="${BASE_DATA_DIR}/${CHECK_ENV}/.env"
-BACKUP_DIR="${BASE_DATA_DIR}/${CHECK_ENV}/data/backups"
+BACKUP_DIR="${BACKUP_DIR:-${BASE_DATA_DIR}/${CHECK_ENV}/backups}"
+
+# Если в .env задан кастомный BACKUP_DIR, считываем его
+if [ -f "$ENV_FILE" ]; then
+  ENV_BACKUP_DIR="$(grep -E '^BACKUP_DIR=' "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  if [ -n "$ENV_BACKUP_DIR" ]; then
+    BACKUP_DIR="$ENV_BACKUP_DIR"
+  fi
+fi
 
 FAIL_CATEGORY=""
 FAIL_REASON=""
@@ -77,19 +87,23 @@ fi
 # 5. Проверка срока действия SSL-сертификата (если установлен)
 CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 if [ -z "$FAIL_CATEGORY" ] && [ -f "$CERT_PATH" ]; then
-  # Предупреждение, если сертификат истекает менее чем через 7 дней (604800 секунд)
   if ! openssl x509 -checkend 604800 -noout -in "$CERT_PATH" >/dev/null 2>&1; then
     FAIL_CATEGORY="SSL_EXPIRING"
     FAIL_REASON="SSL-сертификат для ${DOMAIN} истекает менее чем через 7 дней"
   fi
 fi
 
-# 6. Проверка свежести резервных копий (не старше 36 часов для production)
+# 6. Проверка свежести И пригодности резервных копий (P1 #7)
 if [ -z "$FAIL_CATEGORY" ] && [ "$CHECK_ENV" = "production" ] && [ -d "$BACKUP_DIR" ]; then
-  RECENT_BACKUP="$(find "$BACKUP_DIR" -maxdepth 1 -name 'media-*.db' -mmin -2160 | head -n 1)"
+  RECENT_BACKUP="$(find "$BACKUP_DIR" -maxdepth 1 -name 'media-*.db' -mmin -2160 | sort | tail -n 1)"
   if [ -z "$RECENT_BACKUP" ] && [ -f "${BASE_DATA_DIR}/${CHECK_ENV}/data/media.db" ]; then
     FAIL_CATEGORY="BACKUP_STALE"
     FAIL_REASON="В ${BACKUP_DIR} нет свежих резервных копий БД за последние 36 часов"
+  elif [ -n "$RECENT_BACKUP" ] && [ -f "${CURRENT_DIR}/server/restore.js" ]; then
+    if ! (cd "$CURRENT_DIR" && ENV_FILE="$ENV_FILE" BACKUP_DIR="$BACKUP_DIR" node server/restore.js "--backup=${RECENT_BACKUP}" --test-restore >/dev/null 2>&1); then
+      FAIL_CATEGORY="BACKUP_CORRUPT"
+      FAIL_REASON="Последняя резервная копия (${RECENT_BACKUP}) не прошла проверку целостности/восстановления"
+    fi
   fi
 fi
 

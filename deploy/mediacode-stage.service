@@ -4,11 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=mediacode
-Group=mediacode
+User=mediacode-stage
+Group=mediacode-stage
 WorkingDirectory=/opt/mediacode/staging/current
 EnvironmentFile=/var/lib/mediacode/staging/.env
 Environment=NODE_ENV=production
+Environment=DEPLOY_ENV=staging
 Environment=APP_ENV=staging
 Environment=HOST=127.0.0.1
 Environment=PORT=4001
@@ -28,7 +29,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-ReadWritePaths=/var/lib/mediacode/staging/data /var/lib/mediacode/staging/uploads
+ReadWritePaths=/var/lib/mediacode/staging/data /var/lib/mediacode/staging/uploads /var/lib/mediacode/staging/backups
 
 StandardOutput=journal
 StandardError=journal

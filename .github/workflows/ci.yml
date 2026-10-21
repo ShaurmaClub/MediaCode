@@ -203,7 +203,7 @@ jobs:
         id: deploy
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy-stage' }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
@@ -328,7 +328,7 @@ jobs:
         id: deploy
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy-prod' }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}

@@ -3,7 +3,7 @@
 # MediaCode — Помощник первичной настройки GitHub Actions & Environments
 # Автоматизирует:
 #   1. Генерацию отдельных SSH-ключей (Ed25519) для окружений production и staging
-#   2. Добавление публичных ключей в /home/deploy/.ssh/authorized_keys
+#   2. Установку ключей в изолированные учётные записи deploy-prod и deploy-stage (P0 #1)
 #   3. Фиксацию SSH host keys (SSH_KNOWN_HOSTS) для строгой проверки подлинности сервера
 #   4. Проверку тестового SSH-подключения с StrictHostKeyChecking=yes
 #   5. Загрузку секретов в GitHub Environments (production и staging) через GitHub CLI (gh)
@@ -16,7 +16,8 @@ set -o pipefail
 REPO="${GITHUB_REPO:-ShaurmaClub/MediaCode}"
 SSH_HOST="${SSH_HOST:-}"
 SSH_PORT="${SSH_PORT:-22}"
-DEPLOY_USER="${DEPLOY_USER:-deploy}"
+PROD_DEPLOY_USER="${PROD_DEPLOY_USER:-deploy-prod}"
+STAGE_DEPLOY_USER="${STAGE_DEPLOY_USER:-deploy-stage}"
 PROD_URL="${PROD_URL:-https://kaiton.ru/api/health/ready}"
 STAGE_URL="${STAGE_URL:-https://stage.kaiton.ru/api/health/ready}"
 DRY_RUN=0
@@ -35,8 +36,12 @@ while [[ $# -gt 0 ]]; do
       SSH_PORT="$2"
       shift 2
       ;;
-    --user)
-      DEPLOY_USER="$2"
+    --prod-user)
+      PROD_DEPLOY_USER="$2"
+      shift 2
+      ;;
+    --stage-user)
+      STAGE_DEPLOY_USER="$2"
       shift 2
       ;;
     --prod-url)
@@ -57,13 +62,14 @@ while [[ $# -gt 0 ]]; do
   bash deploy/setup-github.sh --host <IP_ИЛИ_ДОМЕН_СЕРВЕРА> [опции]
 
 Опции:
-  --host <host>       Публичный IP или домен Ubuntu-сервера (обязательно)
-  --port <port>       SSH-порт сервера (по умолчанию: 22)
-  --user <user>       Пользователь деплоя на сервере (по умолчанию: deploy)
-  --repo <owner/repo> Репозиторий GitHub (по умолчанию: ShaurmaClub/MediaCode)
-  --prod-url <url>    Внешний URL готовности production (по умолчанию: https://kaiton.ru/api/health/ready)
-  --stage-url <url>   Внешний URL готовности staging (по умолчанию: https://stage.kaiton.ru/api/health/ready)
-  --dry-run           Проверить генерацию ключей и known_hosts без отправки в GitHub
+  --host <host>         Публичный IP или домен Ubuntu-сервера (обязательно)
+  --port <port>         SSH-порт сервера (по умолчанию: 22)
+  --prod-user <user>    Пользователь деплоя production (по умолчанию: deploy-prod)
+  --stage-user <user>   Пользователь деплоя staging (по умолчанию: deploy-stage)
+  --repo <owner/repo>   Репозиторий GitHub (по умолчанию: ShaurmaClub/MediaCode)
+  --prod-url <url>      Внешний URL готовности production (по умолчанию: https://kaiton.ru/api/health/ready)
+  --stage-url <url>     Внешний URL готовности staging (по умолчанию: https://stage.kaiton.ru/api/health/ready)
+  --dry-run             Проверить генерацию ключей и known_hosts без отправки в GitHub
 EOF
       exit 0
       ;;
@@ -100,7 +106,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # 1. Генерация отдельных ключей для production и staging
-log "Генерация изолированных SSH-ключей Ed25519 для окружений production и staging..."
+log "Генерация изолированных SSH-ключей Ed25519 для окружений production (${PROD_DEPLOY_USER}) и staging (${STAGE_DEPLOY_USER})..."
 ssh-keygen -t ed25519 -N "" -C "github-actions-production@${REPO}" -f "${TMP_KEY_DIR}/id_ed25519_prod" >/dev/null || {
   err "Не удалось сгенерировать ключ для production"
   exit 1
@@ -127,23 +133,24 @@ else
   ssh-keygen -lf "${KNOWN_HOSTS_FILE}"
 fi
 
-# 3. Установка публичных ключей в authorized_keys пользователя deploy
-install_pubkeys_locally() {
-  local auth_file="/home/${DEPLOY_USER}/.ssh/authorized_keys"
-  if [[ -d "/home/${DEPLOY_USER}" ]] && [[ "${EUID}" -eq 0 || "$(id -un)" == "${DEPLOY_USER}" ]]; then
-    mkdir -p "/home/${DEPLOY_USER}/.ssh"
+# 3. Установка публичных ключей в authorized_keys изолированных пользователей deploy-prod и deploy-stage
+install_pubkey_for_user() {
+  local target_user="$1"
+  local pub_file="$2"
+  local auth_file="/home/${target_user}/.ssh/authorized_keys"
+
+  if [[ -d "/home/${target_user}" ]] && [[ "${EUID}" -eq 0 || "$(id -un)" == "${target_user}" ]]; then
+    mkdir -p "/home/${target_user}/.ssh"
     touch "${auth_file}"
-    for pub_file in "${TMP_KEY_DIR}/id_ed25519_prod.pub" "${TMP_KEY_DIR}/id_ed25519_stage.pub"; do
-      local pub_content
-      pub_content="$(cat "${pub_file}")"
-      if ! grep -qxF "${pub_content}" "${auth_file}" 2>/dev/null; then
-        printf '%s\n' "${pub_content}" >> "${auth_file}"
-      fi
-    done
-    chmod 700 "/home/${DEPLOY_USER}/.ssh"
+    local pub_content
+    pub_content="$(cat "${pub_file}")"
+    if ! grep -qxF "${pub_content}" "${auth_file}" 2>/dev/null; then
+      printf '%s\n' "${pub_content}" >> "${auth_file}"
+    fi
+    chmod 700 "/home/${target_user}/.ssh"
     chmod 600 "${auth_file}"
     if [[ "${EUID}" -eq 0 ]]; then
-      chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh"
+      chown -R "${target_user}:${target_user}" "/home/${target_user}/.ssh"
     fi
     return 0
   fi
@@ -151,39 +158,18 @@ install_pubkeys_locally() {
 }
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then
-  if install_pubkeys_locally; then
-    ok "Публичные ключи добавлены локально в /home/${DEPLOY_USER}/.ssh/authorized_keys"
+  if install_pubkey_for_user "${PROD_DEPLOY_USER}" "${TMP_KEY_DIR}/id_ed25519_prod.pub" && \
+     install_pubkey_for_user "${STAGE_DEPLOY_USER}" "${TMP_KEY_DIR}/id_ed25519_stage.pub"; then
+    ok "Публичные ключи добавлены локально в /home/${PROD_DEPLOY_USER}/.ssh/authorized_keys и /home/${STAGE_DEPLOY_USER}/.ssh/authorized_keys"
   else
-    log "Копирование публичных ключей на ${DEPLOY_USER}@${SSH_HOST}:${SSH_PORT}..."
-    PUB_PROD="$(cat "${TMP_KEY_DIR}/id_ed25519_prod.pub")"
-    PUB_STAGE="$(cat "${TMP_KEY_DIR}/id_ed25519_stage.pub")"
-    ssh -p "${SSH_PORT}" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="${KNOWN_HOSTS_FILE}" \
-      "${DEPLOY_USER}@${SSH_HOST}" \
-      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && grep -qxF '${PUB_PROD}' ~/.ssh/authorized_keys || echo '${PUB_PROD}' >> ~/.ssh/authorized_keys && grep -qxF '${PUB_STAGE}' ~/.ssh/authorized_keys || echo '${PUB_STAGE}' >> ~/.ssh/authorized_keys" || {
-        warn "Автоматическая установка ключей по SSH не удалась. Добавьте эти 2 публичных ключа в /home/${DEPLOY_USER}/.ssh/authorized_keys вручную:"
-        echo "--- PRODUCTION PUBLIC KEY ---"
-        cat "${TMP_KEY_DIR}/id_ed25519_prod.pub"
-        echo "--- STAGING PUBLIC KEY ---"
-        cat "${TMP_KEY_DIR}/id_ed25519_stage.pub"
-      }
-  fi
-
-  # 4. Проверка безопасного подключения
-  log "Проверка тестового SSH-подключения с верификацией host key..."
-  if ssh -i "${TMP_KEY_DIR}/id_ed25519_prod" \
-    -p "${SSH_PORT}" \
-    -o BatchMode=yes \
-    -o ConnectTimeout=10 \
-    -o StrictHostKeyChecking=yes \
-    -o UserKnownHostsFile="${KNOWN_HOSTS_FILE}" \
-    "${DEPLOY_USER}@${SSH_HOST}" "echo ok" >/dev/null 2>&1; then
-    ok "Тестовое SSH-соединение под пользователем ${DEPLOY_USER} успешно проверено"
-  else
-    warn "Не удалось выполнить тестовое подключение по новому ключу (возможно, скрипт запущен внутри самого сервера без loopback-маршрута на публичный IP)."
+    warn "Добавьте публичные ключи на сервер:"
+    echo "--- /home/${PROD_DEPLOY_USER}/.ssh/authorized_keys ---"
+    cat "${TMP_KEY_DIR}/id_ed25519_prod.pub"
+    echo "--- /home/${STAGE_DEPLOY_USER}/.ssh/authorized_keys ---"
+    cat "${TMP_KEY_DIR}/id_ed25519_stage.pub"
   fi
 fi
 
-# 5. Загрузка секретов в GitHub Environments через gh CLI
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   ok "Режим --dry-run завершён успешно. Временные ключи будут автоматически удалены."
   exit 0
@@ -204,18 +190,19 @@ fi
 
 configure_gh_environment() {
   local env_name="$1"
-  local key_file="$2"
-  local deploy_path="$3"
-  local service_name="$4"
-  local health_url="$5"
+  local ssh_user="$2"
+  local key_file="$3"
+  local deploy_path="$4"
+  local service_name="$5"
+  local health_url="$6"
 
-  log "Настройка GitHub Environment '${env_name}' в репозитории ${REPO}..."
+  log "Настройка GitHub Environment '${env_name}' (SSH_USER=${ssh_user}) в репозитории ${REPO}..."
   gh api --method PUT -H "Accept: application/vnd.github+json" \
     "/repos/${REPO}/environments/${env_name}" >/dev/null 2>&1 || true
 
   gh secret set SSH_HOST --env "${env_name}" --repo "${REPO}" --body "${SSH_HOST}"
   gh secret set SSH_PORT --env "${env_name}" --repo "${REPO}" --body "${SSH_PORT}"
-  gh secret set SSH_USER --env "${env_name}" --repo "${REPO}" --body "${DEPLOY_USER}"
+  gh secret set SSH_USER --env "${env_name}" --repo "${REPO}" --body "${ssh_user}"
   gh secret set SSH_PRIVATE_KEY --env "${env_name}" --repo "${REPO}" < "${key_file}"
   gh secret set SSH_KNOWN_HOSTS --env "${env_name}" --repo "${REPO}" < "${KNOWN_HOSTS_FILE}"
   gh secret set DEPLOY_PATH --env "${env_name}" --repo "${REPO}" --body "${deploy_path}"
@@ -227,6 +214,7 @@ configure_gh_environment() {
 
 configure_gh_environment \
   "production" \
+  "${PROD_DEPLOY_USER}" \
   "${TMP_KEY_DIR}/id_ed25519_prod" \
   "/opt/mediacode/production" \
   "mediacode-prod" \
@@ -234,6 +222,7 @@ configure_gh_environment \
 
 configure_gh_environment \
   "staging" \
+  "${STAGE_DEPLOY_USER}" \
   "${TMP_KEY_DIR}/id_ed25519_stage" \
   "/opt/mediacode/staging" \
   "mediacode-stage" \

@@ -4,11 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=mediacode
-Group=mediacode
+User=mediacode-prod
+Group=mediacode-prod
 WorkingDirectory=/opt/mediacode/production/current
 EnvironmentFile=/var/lib/mediacode/production/.env
 Environment=NODE_ENV=production
+Environment=DEPLOY_ENV=production
 Environment=APP_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=4000
@@ -27,7 +28,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-ReadWritePaths=/var/lib/mediacode/production/data /var/lib/mediacode/production/uploads
+ReadWritePaths=/var/lib/mediacode/production/data /var/lib/mediacode/production/uploads /var/lib/mediacode/production/backups
 
 StandardOutput=journal
 StandardError=journal

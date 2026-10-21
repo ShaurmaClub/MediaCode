@@ -10,7 +10,14 @@ import path from 'path';
 import crypto from 'crypto';
 import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
+
+if (process.env.ENV_FILE && fs.existsSync(process.env.ENV_FILE)) {
+  dotenv.config({ path: process.env.ENV_FILE, quiet: true });
+} else {
+  dotenv.config({ quiet: true });
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -185,10 +192,7 @@ export async function runBackup(db, options = {}) {
     // ignore
   }
 
-  // 5. Опциональная синхронизация во внешнее хранилище (restic)
-  const offsite = options.skipOffsite ? { configured: false, synced: false } : syncOffsiteRestic(targetPathsForOffsite, options.log || console);
-
-  // 6. Сохранение манифеста метаданных для верифицируемого восстановления
+  // 5. Сохранение манифеста метаданных ПЕРЕД отправкой во внешнее хранилище (чтобы restic захватил и манифест)
   const manifestPath = path.join(dir, `manifest-${stamp}.json`);
   const manifest = {
     backupId: baseName,
@@ -203,9 +207,17 @@ export async function runBackup(db, options = {}) {
     dbSha256,
     uploadsBundle,
     uploadsCount,
-    offsiteProtected: offsite.synced
+    offsiteProtected: false
   };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  targetPathsForOffsite.push(manifestPath);
+
+  // 6. Опциональная синхронизация во внешнее хранилище (restic) вместе с манифестом
+  const offsite = options.skipOffsite ? { configured: false, synced: false } : syncOffsiteRestic(targetPathsForOffsite, options.log || console);
+  if (offsite.synced) {
+    manifest.offsiteProtected = true;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  }
 
   // 7. Ротация старых копий
   const removed = rotateBackups(dir, keep);

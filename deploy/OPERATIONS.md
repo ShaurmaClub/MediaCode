@@ -71,12 +71,14 @@ sudo tail -n 100 /var/log/nginx/access.log /var/log/nginx/error.log
 PREV_TARGET="$(readlink -f /opt/mediacode/production/previous)"
 echo "Откат на: ${PREV_TARGET}"
 
-# 1. Проверяем совместимость текущей БД с кодом предыдущего релиза
-sudo -u mediacode env DB_PATH=/var/lib/mediacode/production/data/media.db \
+# 1. Проверяем совместимость текущей БД с кодом предыдущего релиза от имени mediacode-prod
+sudo -u mediacode-prod env \
+  ENV_FILE=/var/lib/mediacode/production/.env \
+  DB_PATH=/var/lib/mediacode/production/data/media.db \
   node "${PREV_TARGET}/server/migrate.js" --verify-rollback
 
 # 2. Переключаем симлинк current и перезапускаем сервис
-sudo -u deploy ln -sfn "${PREV_TARGET}" /opt/mediacode/production/current
+sudo -u deploy-prod ln -sfn "${PREV_TARGET}" /opt/mediacode/production/current
 sudo systemctl restart mediacode-prod.service
 curl -fsS http://127.0.0.1:4000/api/health/ready
 ```
@@ -92,7 +94,7 @@ curl -fsS http://127.0.0.1:4000/api/health/ready
 sudo systemctl start mediacode-backup.service
 
 # Проверить созданные архивы и манифесты
-ls -lh /var/lib/mediacode/production/backups/
+sudo ls -lh /var/lib/mediacode/production/backups/
 ```
 
 ---

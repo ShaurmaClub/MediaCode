@@ -34,20 +34,22 @@ fi
 
 if [ "$DEPLOY_ENV" = "production" ]; then
   SERVICE_NAME="${SERVICE_NAME:-mediacode-prod}"
+  RUNTIME_USER="${RUNTIME_USER:-mediacode-prod}"
   APP_PORT="${APP_PORT:-4000}"
 else
   SERVICE_NAME="${SERVICE_NAME:-mediacode-stage}"
+  RUNTIME_USER="${RUNTIME_USER:-mediacode-stage}"
   APP_PORT="${APP_PORT:-4001}"
 fi
 
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${APP_PORT}/api/health/ready}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:${APP_PORT}}"
-ENV_ROOT="${BASE_OPT_DIR}/${DEPLOY_ENV}"
+ENV_ROOT="${DEPLOY_PATH:-${BASE_OPT_DIR}/${DEPLOY_ENV}}"
 RELEASES_DIR="${ENV_ROOT}/releases"
 REPO_CACHE_DIR="${ENV_ROOT}/repo"
 CURRENT_LINK="${ENV_ROOT}/current"
 PREVIOUS_LINK="${ENV_ROOT}/previous"
-STATE_DIR="${BASE_DATA_DIR}/${DEPLOY_ENV}"
+STATE_DIR="${DATA_ROOT:-${BASE_DATA_DIR}/${DEPLOY_ENV}}"
 ENV_FILE="${STATE_DIR}/.env"
 LOCK_FILE="/tmp/mediacode-deploy-${DEPLOY_ENV}.lock"
 
@@ -57,22 +59,69 @@ if ! flock -n 9; then
   exit 10
 fi
 
+# Выполнение команд, требующих доступа к .env / SQLite / uploads, от имени изолированного runtime-пользователя (P1 #4)
+run_as_runtime_user() {
+  if [ "${RUN_AS_CURRENT_USER:-0}" = "1" ] || [ "$(id -un)" = "$RUNTIME_USER" ]; then
+    /usr/bin/env \
+      ENV_FILE="$ENV_FILE" \
+      DEPLOY_ENV="$DEPLOY_ENV" \
+      APP_ENV="$DEPLOY_ENV" \
+      DB_PATH="${STATE_DIR}/data/media.db" \
+      UPLOAD_DIR="${STATE_DIR}/uploads/recruitment" \
+      UPLOADS_DIR="${STATE_DIR}/uploads/recruitment" \
+      BACKUP_DIR="${STATE_DIR}/backups" \
+      "$@"
+  else
+    sudo -n -u "$RUNTIME_USER" /usr/bin/env \
+      ENV_FILE="$ENV_FILE" \
+      DEPLOY_ENV="$DEPLOY_ENV" \
+      APP_ENV="$DEPLOY_ENV" \
+      DB_PATH="${STATE_DIR}/data/media.db" \
+      UPLOAD_DIR="${STATE_DIR}/uploads/recruitment" \
+      UPLOADS_DIR="${STATE_DIR}/uploads/recruitment" \
+      BACKUP_DIR="${STATE_DIR}/backups" \
+      "$@"
+  fi
+}
+
+restart_contour_service() {
+  if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl restart "$SERVICE_NAME"
+  else
+    sudo -n /bin/systemctl restart "$SERVICE_NAME"
+  fi
+}
+
+is_contour_service_active() {
+  if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl is-active --quiet "$SERVICE_NAME"
+  else
+    sudo -n /bin/systemctl is-active --quiet "$SERVICE_NAME"
+  fi
+}
+
 echo "=================================================================="
 echo "🚀 Старт Release-Based деплоя МедиаКод"
-echo "   Окружение:    ${DEPLOY_ENV}"
+echo "   Окружение:    ${DEPLOY_ENV} (runtime user: ${RUNTIME_USER})"
 echo "   Целевой SHA:  ${TARGET_SHA}"
 echo "   Сервис:       ${SERVICE_NAME} (порт ${APP_PORT})"
 echo "   Каталог:      ${ENV_ROOT}"
 echo "   Данные:       ${STATE_DIR}"
 echo "=================================================================="
 
-if [ ! -f "$ENV_FILE" ]; then
+if ! run_as_runtime_user /bin/test -f "$ENV_FILE"; then
   echo "❌ [DEPLOY] Не найден файл окружения ${ENV_FILE}. Сначала выполните установку сервера (deploy/install.sh)."
   exit 10
 fi
 
-mkdir -p "$RELEASES_DIR" "${STATE_DIR}/data/backups" "${STATE_DIR}/uploads/recruitment" || {
-  echo "❌ [DEPLOY] Не удалось подготовить рабочие каталоги в ${ENV_ROOT} / ${STATE_DIR}"
+mkdir -p "$RELEASES_DIR" || {
+  echo "❌ [DEPLOY] Не удалось подготовить каталог релизов ${RELEASES_DIR}"
   exit 10
 }
 
@@ -87,19 +136,11 @@ else
 fi
 
 # ==============================================================================
-# ШАГ 1. ОБЯЗАТЕЛЬНЫЙ PRE-DEPLOY BACKUP
+# ШАГ 1. ОБЯЗАТЕЛЬНЫЙ PRE-DEPLOY BACKUP (ОТ ИМЕНИ RUNTIME-ПОЛЬЗОВАТЕЛЯ)
 # ==============================================================================
-if [ -n "$PREV_RELEASE_DIR" ] && [ -f "${STATE_DIR}/data/media.db" ]; then
+if [ -n "$PREV_RELEASE_DIR" ] && run_as_runtime_user /bin/test -f "${STATE_DIR}/data/media.db"; then
   echo "💾 Шаг 1/6: Создание предрелизной резервной копии БД и загрузок..."
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-    export APP_ENV="$DEPLOY_ENV"
-    export APP_COMMIT_SHA="$PREV_SHA"
-    cd "$PREV_RELEASE_DIR" && node server/backup.js --with-uploads --reason=pre-deploy
-  )
+  run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=pre-deploy
   BACKUP_RC=$?
   if [ "$BACKUP_RC" -ne 0 ]; then
     echo "❌ [DEPLOY] Предрелизное резервное копирование завершилось с ошибкой (код ${BACKUP_RC})!"
@@ -111,7 +152,7 @@ else
 fi
 
 # ==============================================================================
-# ШАГ 2. ПОДГОТОВКА ИЗОЛИРОВАННОГО РЕЛИЗА releases/<TARGET_SHA>
+# ШАГ 2. ПОДГОТОВКА ИЗОЛИРОВАННОГО РЕЛИЗА releases/<TARGET_SHA> (ИДЕМПОТЕНТНО, P1 #6)
 # ==============================================================================
 NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
 STAGE_BUILD_DIR="${RELEASES_DIR}/.${TARGET_SHA}.tmp.$$"
@@ -127,6 +168,33 @@ cleanup_tmp() {
 trap cleanup_tmp EXIT
 
 prepare_isolated_release() {
+  # Защита от удаления активного релиза при повторном деплое того же самого SHA (P1 #6)
+  if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ] && [ -d "$NEW_RELEASE_DIR" ]; then
+    echo "ℹ️ Повторный деплой уже активного релиза ${TARGET_SHA}: сохраняем рабочий каталог без удаления."
+    if [ -n "$DIST_ARCHIVE" ] && [ -f "$DIST_ARCHIVE" ]; then
+      mkdir -p "${STAGE_BUILD_DIR}/dist" || return 1
+      tar -xzf "$DIST_ARCHIVE" -C "${STAGE_BUILD_DIR}/dist" || return 1
+      if [ ! -f "${STAGE_BUILD_DIR}/dist/index.html" ]; then
+        echo "❌ [DEPLOY] В архиве dist отсутствует dist/index.html!"
+        return 1
+      fi
+      rsync -a --delete "${STAGE_BUILD_DIR}/dist/" "${NEW_RELEASE_DIR}/dist/" || return 1
+      rm -rf "$STAGE_BUILD_DIR"
+    fi
+    ln -sfn "${STATE_DIR}/data" "${NEW_RELEASE_DIR}/data" || return 1
+    ln -sfn "${STATE_DIR}/uploads" "${NEW_RELEASE_DIR}/uploads" || return 1
+    cat > "${NEW_RELEASE_DIR}/.release-meta.json" <<EOF
+{
+  "sha": "${TARGET_SHA}",
+  "env": "${DEPLOY_ENV}",
+  "deployedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+    printf '%s\n' "${TARGET_SHA}" > "${NEW_RELEASE_DIR}/.release-sha"
+    chmod -R u=rwX,g=rX,o= "$NEW_RELEASE_DIR" || return 1
+    return 0
+  fi
+
   echo "📥 Шаг 2/6: Получение точного коммита ${TARGET_SHA}..."
   if [ ! -d "${REPO_CACHE_DIR}/.git" ]; then
     git clone --no-checkout "$REPO_URL" "$REPO_CACHE_DIR" || return 1
@@ -163,10 +231,10 @@ prepare_isolated_release() {
     return 1
   fi
 
-  # Симлинки на персистентные каталоги данных и загрузок
+  # Единая схема симлинков на персистентные каталоги данных и загрузок (P1 #5)
   rm -rf "${STAGE_BUILD_DIR}/data" "${STAGE_BUILD_DIR}/uploads" || return 1
-  ln -s "${STATE_DIR}/data" "${STAGE_BUILD_DIR}/data" || return 1
-  ln -s "${STATE_DIR}/uploads" "${STAGE_BUILD_DIR}/uploads" || return 1
+  ln -sfn "${STATE_DIR}/data" "${STAGE_BUILD_DIR}/data" || return 1
+  ln -sfn "${STATE_DIR}/uploads" "${STAGE_BUILD_DIR}/uploads" || return 1
 
   cat > "${STAGE_BUILD_DIR}/.release-meta.json" <<EOF
 {
@@ -175,6 +243,8 @@ prepare_isolated_release() {
   "deployedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
+  printf '%s\n' "${TARGET_SHA}" > "${STAGE_BUILD_DIR}/.release-sha"
+  chmod -R u=rwX,g=rX,o= "$STAGE_BUILD_DIR" || return 1
 
   rm -rf "$NEW_RELEASE_DIR" || return 1
   mv "$STAGE_BUILD_DIR" "$NEW_RELEASE_DIR" || return 1
@@ -192,19 +262,13 @@ fi
 # ШАГ 4. ПРОВЕРКА И ПРИМЕНЕНИЕ МИГРАЦИЙ БД ДО ПЕРЕКЛЮЧЕНИЯ ТРАФИКА
 # ==============================================================================
 echo "🗄️ Шаг 4/6: Проверка совместимости и миграция схемы SQLite..."
-(
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-  export APP_ENV="$DEPLOY_ENV"
-  export APP_COMMIT_SHA="$TARGET_SHA"
-  cd "$NEW_RELEASE_DIR" && node server/migrate.js --verify
-)
+run_as_runtime_user APP_COMMIT_SHA="$TARGET_SHA" /usr/bin/node "${NEW_RELEASE_DIR}/server/migrate.js" --verify
 MIGRATE_RC=$?
 if [ "$MIGRATE_RC" -ne 0 ]; then
   echo "❌ [DEPLOY] Ошибка миграции или несовместимость схемы БД! Переключение релиза отменено."
-  rm -rf "$NEW_RELEASE_DIR"
+  if [ "$NEW_RELEASE_DIR" != "$PREV_RELEASE_DIR" ]; then
+    rm -rf "$NEW_RELEASE_DIR"
+  fi
   exit 21
 fi
 
@@ -224,7 +288,7 @@ ln -sfn "$NEW_RELEASE_DIR" "$CURRENT_LINK" || {
   exit 21
 }
 
-sudo -n systemctl restart "$SERVICE_NAME"
+restart_contour_service
 RESTART_RC=$?
 
 # ==============================================================================
@@ -232,14 +296,14 @@ RESTART_RC=$?
 # ==============================================================================
 verify_release() {
   local expected_sha="$1"
-  local retries=15
-  local wait_sec=2
+  local retries="${VERIFY_RETRIES:-15}"
+  local wait_sec="${VERIFY_WAIT_SEC:-2}"
 
   echo "🩺 Проверка работоспособности релиза (ожидается SHA: ${expected_sha})..."
 
   for i in $(seq 1 "$retries"); do
     # 1. Запущен ли systemd-сервис
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
+    if is_contour_service_active; then
       # 2-6. Проверка /api/health/ready (HTTP 200, db=ok, schemaCompatible=true, frontendReady=true, commit=expected_sha)
       local health_json=""
       if health_json="$(curl -fsS --max-time 4 "$HEALTH_URL" 2>/dev/null)"; then
@@ -277,7 +341,6 @@ verify_release() {
   done
 
   echo "❌ Не пройдена комплексная проверка работоспособности для SHA ${expected_sha}!"
-  systemctl status "$SERVICE_NAME" --no-pager -n 20 || true
   return 1
 }
 
@@ -297,9 +360,10 @@ if [ "$VERIFY_RC" -eq 0 ]; then
   CURRENT_REAL="$(readlink -f "$CURRENT_LINK" || true)"
   PREVIOUS_REAL="$(readlink -f "$PREVIOUS_LINK" || true)"
 
-  mapfile -t ALL_RELEASES < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | awk '{print $2}')
+  mapfile -t ALL_RELEASES < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | awk '{print $2}')
   COUNT=0
   for rel_path in "${ALL_RELEASES[@]}"; do
+    [ -z "$rel_path" ] && continue
     COUNT=$((COUNT + 1))
     if [ "$COUNT" -le "$KEEP_RELEASES" ]; then
       continue
@@ -320,8 +384,8 @@ fi
 # ==============================================================================
 echo "🚨 СБОЙ ДЕПЛОЯ: Новая версия (${TARGET_SHA}) не прошла проверки работоспособности!"
 
-if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ]; then
-  echo "❌ Предыдущий релиз отсутствует — автоматический откат невозможен!"
+if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ] || [ "$PREV_RELEASE_DIR" = "$NEW_RELEASE_DIR" ]; then
+  echo "❌ Предыдущий отличный релиз отсутствует — автоматический откат невозможен!"
   exit 31
 fi
 
@@ -329,15 +393,7 @@ echo "⏪ Запуск автоматического отката на пред
 echo "ℹ️ База данных SQLite и пользовательские файлы сохраняются (без разрушительного перезаписывания)."
 
 # Проверяем, совместима ли текущая схема БД с предыдущим релизом
-(
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-  export APP_ENV="$DEPLOY_ENV"
-  export APP_COMMIT_SHA="$PREV_SHA"
-  cd "$PREV_RELEASE_DIR" && node server/migrate.js --verify
-)
+run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback
 COMPAT_RC=$?
 if [ "$COMPAT_RC" -ne 0 ]; then
   echo "❌ КРИТИЧЕСКАЯ ОШИБКА: Схема БД несовместима с предыдущим релизом ${PREV_SHA}!"
@@ -346,7 +402,7 @@ if [ "$COMPAT_RC" -ne 0 ]; then
 fi
 
 ln -sfn "$PREV_RELEASE_DIR" "$CURRENT_LINK"
-sudo -n systemctl restart "$SERVICE_NAME"
+restart_contour_service
 RB_RESTART_RC=$?
 
 if [ "$RB_RESTART_RC" -eq 0 ]; then

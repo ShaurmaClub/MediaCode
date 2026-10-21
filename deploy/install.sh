@@ -3,16 +3,13 @@
 # MediaCode — One-Command Production & Staging Installer for Ubuntu 24.04 LTS
 # Идемпотентный установщик:
 #   - Проверяет совместимость ОС, свободное место и конфликты портов
-#   - Разделяет привилегии: пользователь `mediacode` (runtime) и `deploy` (CD)
-#   - Создаёт изолированные контуры production (4000) и staging (4001)
+#   - Строго изолирует контуры по пользователям и правам:
+#       * production: runtime `mediacode-prod`, deploy `deploy-prod`
+#       * staging:    runtime `mediacode-stage`, deploy `deploy-stage`
+#   - Запрещает прямой публичный доступ к /uploads/ в Nginx (выдача только через авторизованный API), лимит загрузки 55M
 #   - Сохраняет существующие .env, БД, uploads, Nginx и UFW без перезаписи
 #   - Безопасно определяет фактический SSH-порт перед настройкой UFW
 #   - Проверяет DNS-записи перед запросом сертификатов Let's Encrypt
-#
-# Запуск:
-#   sudo bash deploy/install.sh
-#   или неинтерактивно:
-#   sudo PROD_DOMAIN=kaiton.ru STAGE_DOMAIN=stage.kaiton.ru CERTBOT_EMAIL=admin@kaiton.ru bash deploy/install.sh --non-interactive
 # ==============================================================================
 
 set -u
@@ -50,16 +47,6 @@ for arg in "$@"; do
   --skip-certbot          Пропустить выпуск TLS-сертификатов Let's Encrypt
   --skip-ufw              Не изменять настройки межсетевого экрана UFW
   --force-nginx           Перезаписать существующий конфиг /etc/nginx/sites-available/mediacode-kaiton.conf
-
-Переменные окружения:
-  PROD_DOMAIN             Production-домен (по умолчанию: kaiton.ru)
-  STAGE_DOMAIN            Staging-домен (по умолчанию: stage.kaiton.ru)
-  CERTBOT_EMAIL           Email администратора для Let's Encrypt (по умолчанию: пусто — без авто-выпуска TLS)
-  REPO_URL                Git URL репозитория (по умолчанию: https://github.com/ShaurmaClub/MediaCode.git)
-  RUNTIME_USER            Системный пользователь приложения (по умолчанию: mediacode)
-  DEPLOY_USER             Системный пользователь деплоя (по умолчанию: deploy)
-  PROD_PORT               Локальный порт production (по умолчанию: 4000)
-  STAGE_PORT              Локальный порт staging (по умолчанию: 4001)
 EOF
       exit 0
       ;;
@@ -111,8 +98,12 @@ PROD_DOMAIN="${PROD_DOMAIN:-kaiton.ru}"
 STAGE_DOMAIN="${STAGE_DOMAIN:-stage.kaiton.ru}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
 REPO_URL="${REPO_URL:-https://github.com/ShaurmaClub/MediaCode.git}"
-RUNTIME_USER="${RUNTIME_USER:-mediacode}"
-DEPLOY_USER="${DEPLOY_USER:-deploy}"
+
+PROD_RUNTIME_USER="${PROD_RUNTIME_USER:-mediacode-prod}"
+PROD_DEPLOY_USER="${PROD_DEPLOY_USER:-deploy-prod}"
+STAGE_RUNTIME_USER="${STAGE_RUNTIME_USER:-mediacode-stage}"
+STAGE_DEPLOY_USER="${STAGE_DEPLOY_USER:-deploy-stage}"
+
 PROD_PORT="${PROD_PORT:-4000}"
 STAGE_PORT="${STAGE_PORT:-4001}"
 BASE_OPT_DIR="/opt/mediacode"
@@ -131,9 +122,8 @@ if [[ "${NON_INTERACTIVE}" -eq 0 && -t 0 ]]; then
 fi
 
 log "Конфигурация:"
-log "  Production: https://${PROD_DOMAIN} -> 127.0.0.1:${PROD_PORT}"
-log "  Staging:    https://${STAGE_DOMAIN} -> 127.0.0.1:${STAGE_PORT}"
-log "  Runtime user: ${RUNTIME_USER} | Deploy user: ${DEPLOY_USER}"
+log "  Production: https://${PROD_DOMAIN} -> 127.0.0.1:${PROD_PORT} (runtime: ${PROD_RUNTIME_USER}, deploy: ${PROD_DEPLOY_USER})"
+log "  Staging:    https://${STAGE_DOMAIN} -> 127.0.0.1:${STAGE_PORT} (runtime: ${STAGE_RUNTIME_USER}, deploy: ${STAGE_DEPLOY_USER})"
 
 # ------------------------------------------------------------------------------
 # 3. Предварительная диагностика конфликтов портов
@@ -213,37 +203,45 @@ if [[ "${NEED_NODE}" -eq 1 ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 5. Создание изолированных непривилегированных пользователей (mediacode и deploy)
+# 5. Создание изолированных пользователей для каждого окружения (P0 #1)
 # ------------------------------------------------------------------------------
-if ! id -u "${RUNTIME_USER}" >/dev/null 2>&1; then
-  log "Создание непривилегированного runtime-пользователя ${RUNTIME_USER}..."
-  useradd --system --create-home --home-dir "/home/${RUNTIME_USER}" --shell /usr/sbin/nologin "${RUNTIME_USER}"
-  ok "Создан пользователь ${RUNTIME_USER}"
-else
-  ok "Пользователь ${RUNTIME_USER} уже существует"
-fi
+ensure_contour_users() {
+  local runtime_user="$1"
+  local deploy_user="$2"
 
-if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
-  log "Создание пользователя доставки релизов ${DEPLOY_USER}..."
-  useradd --create-home --home-dir "/home/${DEPLOY_USER}" --shell /bin/bash -G "${RUNTIME_USER}" "${DEPLOY_USER}"
-  ok "Создан пользователь ${DEPLOY_USER}"
-else
-  usermod -a -G "${RUNTIME_USER}" "${DEPLOY_USER}" || true
-  ok "Пользователь ${DEPLOY_USER} уже существует"
-fi
+  if ! id -u "${runtime_user}" >/dev/null 2>&1; then
+    useradd --system --create-home --home-dir "/home/${runtime_user}" --shell /usr/sbin/nologin "${runtime_user}"
+    ok "Создан runtime-пользователь ${runtime_user}"
+  else
+    ok "Runtime-пользователь ${runtime_user} уже существует"
+  fi
 
-mkdir -p "/home/${DEPLOY_USER}/.ssh"
-touch "/home/${DEPLOY_USER}/.ssh/authorized_keys"
-chmod 700 "/home/${DEPLOY_USER}/.ssh"
-chmod 600 "/home/${DEPLOY_USER}/.ssh/authorized_keys"
-chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh"
+  if ! id -u "${deploy_user}" >/dev/null 2>&1; then
+    useradd --create-home --home-dir "/home/${deploy_user}" --shell /bin/bash -G "${runtime_user}" "${deploy_user}"
+    ok "Создан deploy-пользователь ${deploy_user}"
+  else
+    usermod -a -G "${runtime_user}" "${deploy_user}" || true
+    ok "Deploy-пользователь ${deploy_user} уже существует"
+  fi
 
-# Ограниченный sudoers для пользователя deploy: только управление сервисами mediacode и запуск бэкапа
+  mkdir -p "/home/${deploy_user}/.ssh"
+  touch "/home/${deploy_user}/.ssh/authorized_keys"
+  chmod 700 "/home/${deploy_user}/.ssh"
+  chmod 600 "/home/${deploy_user}/.ssh/authorized_keys"
+  chown -R "${deploy_user}:${deploy_user}" "/home/${deploy_user}/.ssh"
+}
+
+ensure_contour_users "${PROD_RUNTIME_USER}" "${PROD_DEPLOY_USER}"
+ensure_contour_users "${STAGE_RUNTIME_USER}" "${STAGE_DEPLOY_USER}"
+
+# Строго разделённый sudoers: deploy-prod управляет ТОЛЬКО production, deploy-stage — ТОЛЬКО staging
 SUDOERS_FILE="/etc/sudoers.d/mediacode-deploy"
 cat > "${SUDOERS_FILE}" <<EOF
-Defaults:${DEPLOY_USER} !requiretty
-${DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-prod.service, /bin/systemctl restart mediacode-stage.service, /bin/systemctl reload mediacode-prod.service, /bin/systemctl reload mediacode-stage.service, /bin/systemctl status mediacode-prod.service, /bin/systemctl status mediacode-stage.service, /bin/systemctl is-active mediacode-prod.service, /bin/systemctl is-active mediacode-stage.service
-${DEPLOY_USER} ALL=(${RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env
+Defaults:${PROD_DEPLOY_USER},${STAGE_DEPLOY_USER} !requiretty
+${PROD_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-prod.service, /bin/systemctl reload mediacode-prod.service, /bin/systemctl status mediacode-prod.service, /bin/systemctl is-active mediacode-prod.service
+${PROD_DEPLOY_USER} ALL=(${PROD_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
+${STAGE_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-stage.service, /bin/systemctl reload mediacode-stage.service, /bin/systemctl status mediacode-stage.service, /bin/systemctl is-active mediacode-stage.service
+${STAGE_DEPLOY_USER} ALL=(${STAGE_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
 EOF
 chmod 440 "${SUDOERS_FILE}"
 visudo -cf "${SUDOERS_FILE}" >/dev/null || {
@@ -251,50 +249,56 @@ visudo -cf "${SUDOERS_FILE}" >/dev/null || {
   rm -f "${SUDOERS_FILE}"
   exit 1
 }
-ok "Настроены минимальные sudo-привилегии в ${SUDOERS_FILE}"
+ok "Настроены изолированные sudo-привилегии в ${SUDOERS_FILE}"
 
 # ------------------------------------------------------------------------------
 # 6. Создание структуры каталогов релизов и постоянных данных
 # ------------------------------------------------------------------------------
-log "Подготовка каталогов ${BASE_OPT_DIR} и ${BASE_VAR_DIR}..."
-for env_name in production staging; do
+setup_contour_dirs() {
+  local env_name="$1"
+  local runtime_user="$2"
+  local deploy_user="$3"
+
   mkdir -p "${BASE_OPT_DIR}/${env_name}/releases"
-  mkdir -p "${BASE_OPT_DIR}/${env_name}/shared"
+  mkdir -p "${BASE_OPT_DIR}/${env_name}/repo"
   mkdir -p "${BASE_VAR_DIR}/${env_name}/data"
-  mkdir -p "${BASE_VAR_DIR}/${env_name}/uploads"
+  mkdir -p "${BASE_VAR_DIR}/${env_name}/uploads/recruitment"
   mkdir -p "${BASE_VAR_DIR}/${env_name}/backups"
 
-  # Код принадлежит deploy:mediacode (runtime-пользователь имеет только чтение)
-  chown -R "${DEPLOY_USER}:${RUNTIME_USER}" "${BASE_OPT_DIR}/${env_name}"
+  # Код принадлежит deploy-<env>:mediacode-<env> (runtime имеет только чтение, другой контур не имеет доступа)
+  chown -R "${deploy_user}:${runtime_user}" "${BASE_OPT_DIR}/${env_name}"
   chmod 750 "${BASE_OPT_DIR}/${env_name}"
   chmod 750 "${BASE_OPT_DIR}/${env_name}/releases"
 
-  # Данные принадлежат mediacode:mediacode, права 750 (позволяет группе читать бэкапы при необходимости)
-  chown -R "${RUNTIME_USER}:${RUNTIME_USER}" "${BASE_VAR_DIR}/${env_name}"
-  chmod 750 "${BASE_VAR_DIR}/${env_name}"
-  chmod 770 "${BASE_VAR_DIR}/${env_name}/data"
-  chmod 770 "${BASE_VAR_DIR}/${env_name}/uploads"
-  chmod 770 "${BASE_VAR_DIR}/${env_name}/backups"
-done
-chown "${DEPLOY_USER}:${RUNTIME_USER}" "${BASE_OPT_DIR}"
-chmod 755 "${BASE_OPT_DIR}"
-chown "${RUNTIME_USER}:${RUNTIME_USER}" "${BASE_VAR_DIR}"
-chmod 755 "${BASE_VAR_DIR}"
-ok "Каталоги релизов и данных готовы"
+  # Данные и .env принадлежат ТОЛЬКО mediacode-<env>:mediacode-<env> (права 700 на корень контура)
+  chown -R "${runtime_user}:${runtime_user}" "${BASE_VAR_DIR}/${env_name}"
+  chmod 700 "${BASE_VAR_DIR}/${env_name}"
+  chmod 750 "${BASE_VAR_DIR}/${env_name}/data"
+  chmod 750 "${BASE_VAR_DIR}/${env_name}/uploads"
+  chmod 750 "${BASE_VAR_DIR}/${env_name}/uploads/recruitment"
+  chmod 750 "${BASE_VAR_DIR}/${env_name}/backups"
+}
+
+mkdir -p "${BASE_OPT_DIR}" "${BASE_VAR_DIR}"
+chmod 755 "${BASE_OPT_DIR}" "${BASE_VAR_DIR}"
+setup_contour_dirs "production" "${PROD_RUNTIME_USER}" "${PROD_DEPLOY_USER}"
+setup_contour_dirs "staging" "${STAGE_RUNTIME_USER}" "${STAGE_DEPLOY_USER}"
+ok "Каталоги релизов и данных изолированы по контурам"
 
 # ------------------------------------------------------------------------------
-# 7. Идемпотентная генерация .env с криптостойкими секретами
+# 7. Идемпотентная генерация .env с криптостойкими секретами и едиными путями
 # ------------------------------------------------------------------------------
 create_env_if_missing() {
   local env_name="$1"
-  local port="$2"
-  local domain="$3"
+  local runtime_user="$2"
+  local port="$3"
+  local domain="$4"
   local env_file="${BASE_VAR_DIR}/${env_name}/.env"
 
   if [[ -f "${env_file}" ]]; then
     ok "Файл ${env_file} уже существует — существующие секреты сохранены без изменений"
     chmod 600 "${env_file}"
-    chown "${RUNTIME_USER}:${RUNTIME_USER}" "${env_file}"
+    chown "${runtime_user}:${runtime_user}" "${env_file}"
     return 0
   fi
 
@@ -304,12 +308,14 @@ create_env_if_missing() {
   cat > "${env_file}" <<EOF
 NODE_ENV=production
 DEPLOY_ENV=${env_name}
+APP_ENV=${env_name}
 HOST=127.0.0.1
 PORT=${port}
 PUBLIC_ORIGIN=https://${domain}
 SESSION_SECRET=${session_secret}
 DB_PATH=${BASE_VAR_DIR}/${env_name}/data/media.db
-UPLOADS_DIR=${BASE_VAR_DIR}/${env_name}/uploads
+UPLOAD_DIR=${BASE_VAR_DIR}/${env_name}/uploads/recruitment
+UPLOADS_DIR=${BASE_VAR_DIR}/${env_name}/uploads/recruitment
 BACKUP_DIR=${BASE_VAR_DIR}/${env_name}/backups
 BACKUP_KEEP=14
 RATE_LIMIT_MAX=250
@@ -327,18 +333,20 @@ TRUST_PROXY=1
 # TELEGRAM_THREAD_ID=
 EOF
   chmod 600 "${env_file}"
-  chown "${RUNTIME_USER}:${RUNTIME_USER}" "${env_file}"
-  ok "Создан ${env_file} (права 0600, криптостойкий SESSION_SECRET сгенерирован, в лог не выводится)"
+  chown "${runtime_user}:${runtime_user}" "${env_file}"
+  ok "Создан ${env_file} (права 0600, владелец ${runtime_user}, секреты в лог не выводятся)"
 }
 
-create_env_if_missing "production" "${PROD_PORT}" "${PROD_DOMAIN}"
-create_env_if_missing "staging" "${STAGE_PORT}" "${STAGE_DOMAIN}"
+create_env_if_missing "production" "${PROD_RUNTIME_USER}" "${PROD_PORT}" "${PROD_DOMAIN}"
+create_env_if_missing "staging" "${STAGE_RUNTIME_USER}" "${STAGE_PORT}" "${STAGE_DOMAIN}"
 
 # ------------------------------------------------------------------------------
 # 8. Первичное развёртывание релизов production и staging
 # ------------------------------------------------------------------------------
 bootstrap_initial_release() {
   local env_name="$1"
+  local runtime_user="$2"
+  local deploy_user="$3"
   local env_root="${BASE_OPT_DIR}/${env_name}"
   local current_link="${env_root}/current"
 
@@ -360,8 +368,8 @@ bootstrap_initial_release() {
     rsync -a \
       --exclude='.git' \
       --exclude='node_modules' \
-      --exclude='server/data' \
-      --exclude='server/uploads' \
+      --exclude='data' \
+      --exclude='uploads' \
       --exclude='.env' \
       "${SOURCE_REPO_DIR}/" "${release_dir}/"
   else
@@ -375,40 +383,47 @@ bootstrap_initial_release() {
     rm -rf "${release_dir}/.git"
   fi
 
+  cat > "${release_dir}/.release-meta.json" <<EOF
+{
+  "sha": "${init_sha}",
+  "env": "${env_name}",
+  "deployedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
   printf '%s\n' "${init_sha}" > "${release_dir}/.release-sha"
-  chown -R "${DEPLOY_USER}:${RUNTIME_USER}" "${release_dir}"
+  chown -R "${deploy_user}:${runtime_user}" "${release_dir}"
 
   log "Установка зависимостей и сборка frontend для ${env_name}..."
-  su - "${DEPLOY_USER}" -c "cd '${release_dir}' && npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev" || {
+  su - "${deploy_user}" -c "cd '${release_dir}' && npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev" || {
     err "Ошибка сборки первоначального релиза для ${env_name}"
     return 1
   }
 
-  # Подключение персистентных каталогов данных и загрузок
-  rm -rf "${release_dir}/server/data" "${release_dir}/server/uploads"
-  ln -sfn "${BASE_VAR_DIR}/${env_name}/data" "${release_dir}/server/data"
-  ln -sfn "${BASE_VAR_DIR}/${env_name}/uploads" "${release_dir}/server/uploads"
-  ln -sfn "${BASE_VAR_DIR}/${env_name}/.env" "${release_dir}/.env"
+  # Единая схема симлинков: корневые каталоги data и uploads ведут в /var/lib/mediacode/<env>
+  rm -rf "${release_dir}/data" "${release_dir}/uploads"
+  ln -sfn "${BASE_VAR_DIR}/${env_name}/data" "${release_dir}/data"
+  ln -sfn "${BASE_VAR_DIR}/${env_name}/uploads" "${release_dir}/uploads"
 
-  chown -R "${DEPLOY_USER}:${RUNTIME_USER}" "${release_dir}"
+  chown -R "${deploy_user}:${runtime_user}" "${release_dir}"
   chmod -R u=rwX,g=rX,o= "${release_dir}"
 
-  # Проверка и применение миграций БД от имени runtime-пользователя
-  sudo -u "${RUNTIME_USER}" env \
+  # Проверка и применение миграций БД от имени изолированного runtime-пользователя
+  sudo -n -u "${runtime_user}" /usr/bin/env \
     NODE_ENV=production \
+    ENV_FILE="${BASE_VAR_DIR}/${env_name}/.env" \
     DB_PATH="${BASE_VAR_DIR}/${env_name}/data/media.db" \
-    node "${release_dir}/server/migrate.js" || {
+    /usr/bin/node "${release_dir}/server/migrate.js" --verify || {
       err "Ошибка инициализации схемы БД для ${env_name}"
       return 1
     }
 
   ln -sfn "${release_dir}" "${current_link}"
-  chown -h "${DEPLOY_USER}:${RUNTIME_USER}" "${current_link}"
+  chown -h "${deploy_user}:${runtime_user}" "${current_link}"
   ok "Первоначальный релиз ${env_name} установлен: ${release_dir}"
 }
 
-bootstrap_initial_release "production" || exit 1
-bootstrap_initial_release "staging" || exit 1
+bootstrap_initial_release "production" "${PROD_RUNTIME_USER}" "${PROD_DEPLOY_USER}" || exit 1
+bootstrap_initial_release "staging" "${STAGE_RUNTIME_USER}" "${STAGE_DEPLOY_USER}" || exit 1
 
 # ------------------------------------------------------------------------------
 # 9. Установка и запуск systemd unit-файлов и таймеров
@@ -437,10 +452,10 @@ systemctl enable mediacode-prod.service mediacode-stage.service mediacode-backup
 systemctl restart mediacode-prod.service
 systemctl restart mediacode-stage.service
 systemctl start mediacode-backup.timer mediacode-monitor.timer
-ok "Сервисы mediacode-prod, mediacode-stage и таймеры backup/monitor запущены и добавлены в автозагрузку"
+ok "Сервисы mediacode-prod, mediacode-stage и таймеры backup/monitor запущены"
 
 # ------------------------------------------------------------------------------
-# 10. Настройка Nginx (без разрушения существующих сайтов)
+# 10. Настройка Nginx (без публичного /uploads/, лимит 55M)
 # ------------------------------------------------------------------------------
 NGINX_AVAIL="/etc/nginx/sites-available/mediacode-kaiton.conf"
 NGINX_ENABLED="/etc/nginx/sites-enabled/mediacode-kaiton.conf"
@@ -460,17 +475,16 @@ server {
     server_name ${PROD_DOMAIN} www.${PROD_DOMAIN};
 
     server_tokens off;
-    client_max_body_size 15M;
+    client_max_body_size 55M;
 
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
-    location /uploads/ {
-        alias ${BASE_VAR_DIR}/production/uploads/;
-        access_log off;
-        expires 30d;
-        add_header Cache-Control "public, no-transform";
+    # Запрет прямого публичного доступа к приватным загрузкам кандидатов (P0 #2)
+    location ^~ /uploads/ {
+        deny all;
+        return 404;
     }
 
     location /api/auth/ {
@@ -481,6 +495,8 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 
     location /api/ {
@@ -491,6 +507,8 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 
     location / {
@@ -500,6 +518,8 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 }
 
@@ -509,16 +529,16 @@ server {
     server_name ${STAGE_DOMAIN};
 
     server_tokens off;
-    client_max_body_size 15M;
+    client_max_body_size 55M;
 
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header X-Robots-Tag "noindex, nofollow" always;
 
-    location /uploads/ {
-        alias ${BASE_VAR_DIR}/staging/uploads/;
-        access_log off;
-        expires 7d;
+    location ^~ /uploads/ {
+        deny all;
+        return 404;
     }
 
     location / {
@@ -528,20 +548,16 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 }
 EOF
   ln -sfn "${NGINX_AVAIL}" "${NGINX_ENABLED}"
-  # Удаляем дефолтный сайт только если на сервере нет других кастомных конфигов
   OTHER_SITES="$(find /etc/nginx/sites-enabled -maxdepth 1 -type l ! -name 'default' ! -name 'mediacode-kaiton.conf' | wc -l)"
   if [[ "${OTHER_SITES}" -eq 0 && -L /etc/nginx/sites-enabled/default ]]; then
     rm -f /etc/nginx/sites-enabled/default
   fi
-fi
-
-# Разрешаем Nginx читать каталог загрузок через группу mediacode
-if id -u www-data >/dev/null 2>&1; then
-  usermod -a -G "${RUNTIME_USER}" www-data || true
 fi
 
 if nginx -t; then
@@ -674,16 +690,22 @@ MediaCode успешно установлен и проверен!
 ================================================================================
 Production:
   - URL:       https://${PROD_DOMAIN} (upstream 127.0.0.1:${PROD_PORT})
+  - Пользователи: runtime=${PROD_RUNTIME_USER}, deploy=${PROD_DEPLOY_USER}
   - Релизы:    ${BASE_OPT_DIR}/production/current
   - Данные/БД: ${BASE_VAR_DIR}/production/data/media.db
-  - Конфиг:    ${BASE_VAR_DIR}/production/.env
+  - Загрузки:  ${BASE_VAR_DIR}/production/uploads/recruitment
+  - Бэкапы:    ${BASE_VAR_DIR}/production/backups
+  - Конфиг:    ${BASE_VAR_DIR}/production/.env (0600)
   - Сервис:    mediacode-prod.service
 
 Staging:
   - URL:       https://${STAGE_DOMAIN} (upstream 127.0.0.1:${STAGE_PORT})
+  - Пользователи: runtime=${STAGE_RUNTIME_USER}, deploy=${STAGE_DEPLOY_USER}
   - Релизы:    ${BASE_OPT_DIR}/staging/current
   - Данные/БД: ${BASE_VAR_DIR}/staging/data/media.db
-  - Конфиг:    ${BASE_VAR_DIR}/staging/.env
+  - Загрузки:  ${BASE_VAR_DIR}/staging/uploads/recruitment
+  - Бэкапы:    ${BASE_VAR_DIR}/staging/backups
+  - Конфиг:    ${BASE_VAR_DIR}/staging/.env (0600)
   - Сервис:    mediacode-stage.service
 
 Следующий шаг (привязка GitHub Actions для автоматического CI/CD):
