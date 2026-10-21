@@ -921,7 +921,8 @@ a {
 .priority-high { background: var(--danger-bg); color: var(--danger-text); border: 1px solid var(--danger-border); }
 .priority-urgent { background: #ef4444; color: #ffffff; }
 
-.status-open { background: var(--success-bg); color: var(--success-text); border: 1px solid var(--success-border); }
+.status-open { background: rgba(249, 115, 22, 0.16); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.48); }
+:root:not([data-theme='dark']) .status-open { background: #fff7ed; color: #ea580c; border: 1px solid #fdba74; }
 .status-applied { background: var(--accent-light); color: var(--accent-text); border: 1px solid var(--border); }
 .status-selected { background: var(--accent-light); color: var(--accent-text); border: 1px solid var(--border); }
 .status-progress { background: var(--surface2); color: var(--accent); border: 1px solid var(--border); }
