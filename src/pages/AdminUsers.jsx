@@ -25,6 +25,7 @@ const ROLE_LABELS = {
 export default function AdminUsers({ currentUser }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const [massCreateModalOpen, setMassCreateModalOpen] = useState(false);
   const [massPhones, setMassPhones] = useState('');
@@ -80,9 +81,9 @@ export default function AdminUsers({ currentUser }) {
     }
   };
 
-  const loadUsers = async () => {
+  const loadUsers = async (showSpinner = !hasLoaded) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const query = new URLSearchParams();
       if (search.trim()) query.set('search', search.trim());
       if (roleFilter !== 'ALL') query.set('role', roleFilter);
@@ -90,6 +91,7 @@ export default function AdminUsers({ currentUser }) {
 
       const res = await api(`/users?${query.toString()}`);
       setUsers(res);
+      setHasLoaded(true);
     } catch (err) {
       toast.error('Не удалось загрузить пользователей: ' + err.message);
     } finally {
@@ -109,7 +111,7 @@ export default function AdminUsers({ currentUser }) {
   const reviewRegistration = async (id, action) => {
     try {
       await api(`/admin/registrations/${id}/${action}`, { method: 'POST' });
-      await Promise.all([loadRegistrations(), loadUsers()]);
+      await Promise.all([loadRegistrations(), loadUsers(false)]);
     } catch (err) {
       toast.error(err.message);
     }
@@ -119,15 +121,19 @@ export default function AdminUsers({ currentUser }) {
     if (!window.confirm('Подтвердить все ожидающие регистрации?')) return;
     try {
       await api('/admin/registrations/approve-all', { method: 'POST' });
-      await Promise.all([loadRegistrations(), loadUsers()]);
+      await Promise.all([loadRegistrations(), loadUsers(false)]);
     } catch (err) {
       toast.error(err.message);
     }
   };
 
   useEffect(() => {
-    loadUsers();
-  }, [roleFilter, statusFilter]);
+    const delay = hasLoaded && search.trim() ? 180 : 0;
+    const timer = setTimeout(() => {
+      loadUsers(!hasLoaded);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [roleFilter, statusFilter, search]);
 
   useEffect(() => { loadRegistrations(); }, []);
 

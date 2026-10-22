@@ -1,5 +1,5 @@
 import app from '../app.js';
-import db from '../db.js';
+import db, { matchesSearchQuery } from '../db.js';
 import { strictAuth, role, getHumanReadableAudit } from '../lib/shared.js';
 
 // ==========================================
@@ -7,7 +7,7 @@ import { strictAuth, role, getHumanReadableAudit } from '../lib/shared.js';
 // ==========================================
 
 app.get('/api/audit', strictAuth, role('ADMIN'), (req, res) => {
-  const { action, entity_type, limit = 200 } = req.query;
+  const { action, entity_type, search, limit = 200 } = req.query;
 
   let sql = `
     SELECT a.*, u.first_name || ' ' || u.last_name as actor_name, u.login as actor_login
@@ -31,10 +31,17 @@ app.get('/api/audit', strictAuth, role('ADMIN'), (req, res) => {
   args.push(Math.min(500, parseInt(limit, 10) || 200));
 
   const rows = db.prepare(sql).all(...args);
-  const formatted = rows.map(r => ({
+  let formatted = rows.map(r => ({
     ...r,
     human_description: getHumanReadableAudit(r.action, r.actor_name, r.entity_type, r.entity_id, r.metadata)
   }));
+
+  if (search && String(search).trim()) {
+    const q = String(search).trim();
+    formatted = formatted.filter(r =>
+      Boolean(matchesSearchQuery(q, r.actor_name, r.actor_login, r.action, r.entity_type, r.entity_id, r.human_description, r.metadata))
+    );
+  }
 
   res.json(formatted);
 });

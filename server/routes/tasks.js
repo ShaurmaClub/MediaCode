@@ -35,14 +35,13 @@ app.get('/api/tasks', strictAuth, (req, res) => {
   }
 
   if (category && category !== 'ALL') {
-    sql += ' AND t.category = ?';
-    args.push(category);
+    sql += ' AND (u_lower(t.category) = u_lower(?) OR u_lower(t.custom_category) = u_lower(?))';
+    args.push(category, category);
   }
 
   if (search && search.trim()) {
-    sql += ' AND (t.title LIKE ? OR t.description LIKE ? OR t.location LIKE ? OR t.skills LIKE ?)';
-    const term = `%${search.trim()}%`;
-    args.push(term, term, term, term);
+    sql += ' AND u_match(?, t.title, t.description, t.category, t.custom_category, t.location, t.skills, t.equipment, t.notes, t.roles_needed, u.first_name, u.last_name) = 1';
+    args.push(search.trim());
   }
 
   sql += ' ORDER BY t.event_date ASC, t.id DESC';
