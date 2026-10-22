@@ -44,6 +44,7 @@ const STATUS_LABELS = {
 export default function RecruitmentReview({ currentUser }) {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const [trackFilter, setTrackFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -62,9 +63,9 @@ export default function RecruitmentReview({ currentUser }) {
   const [busyAction, setBusyAction] = useState(false);
   const [createdUserNotice, setCreatedUserNotice] = useState(null);
 
-  const loadApplications = async () => {
+  const loadApplications = async (showSpinner = !hasLoaded) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const query = new URLSearchParams();
       if (trackFilter !== 'ALL') query.set('track', trackFilter);
       if (statusFilter !== 'ALL') query.set('status', statusFilter);
@@ -74,6 +75,7 @@ export default function RecruitmentReview({ currentUser }) {
       setApplications(res.applications || []);
       setPendingCount(res.pendingCount || 0);
       setTotalCount(res.totalCount || 0);
+      setHasLoaded(true);
     } catch (err) {
       toast.error('Не удалось загрузить заявки: ' + err.message);
     } finally {
@@ -82,8 +84,12 @@ export default function RecruitmentReview({ currentUser }) {
   };
 
   useEffect(() => {
-    loadApplications();
-  }, [trackFilter, statusFilter]);
+    const delay = hasLoaded && search.trim() ? 180 : 0;
+    const timer = setTimeout(() => {
+      loadApplications(!hasLoaded);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [trackFilter, statusFilter, search]);
 
   const handleOpenDetail = async (app) => {
     setSelectedApp(app);

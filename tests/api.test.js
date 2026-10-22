@@ -831,5 +831,61 @@ const appId = found.id;
       });
       assert.equal(link2.status, 409);
     });
+
+  test('SEARCH: Case-insensitive Cyrillic, е/ё normalization, multi-word, skill aliases & phone search across all endpoints', async () => {
+    const admin = new SessionClient();
+    await admin.request('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ login: 'admin', password: 'Demo123!' })
+    });
+
+    // 1. Volunteers search (/api/users): lowercase Cyrillic name, reversed multi-word FIO, skill aliases (смм <-> SMM), е/ё
+    const byLowerName = await admin.request('/api/users?role=STUDENT&status=ACTIVE&search=' + encodeURIComponent('иван'));
+    assert.equal(byLowerName.status, 200);
+    assert.ok(byLowerName.data.some(u => u.first_name === 'Иван' && u.last_name === 'Петров'));
+
+    const byReversedFio = await admin.request('/api/users?role=STUDENT&status=ACTIVE&search=' + encodeURIComponent('петров иван'));
+    assert.equal(byReversedFio.status, 200);
+    assert.ok(byReversedFio.data.some(u => u.first_name === 'Иван' && u.last_name === 'Петров'));
+
+    const bySkillRussianForLatinSmm = await admin.request('/api/users?role=STUDENT&status=ACTIVE&search=' + encodeURIComponent('смм'));
+    assert.equal(bySkillRussianForLatinSmm.status, 200);
+    assert.ok(bySkillRussianForLatinSmm.data.some(u => u.login === 'anna'));
+
+    const byYoNormalized = await admin.request('/api/users?role=STUDENT&status=ACTIVE&search=' + encodeURIComponent('видеосъемка'));
+    assert.equal(byYoNormalized.status, 200);
+    assert.ok(byYoNormalized.data.some(u => u.login === 'student'));
+
+    // 2. Tasks / Events search (/api/tasks): lowercase Cyrillic title, location, equipment, е/ё
+    const taskByLowerTitle = await admin.request('/api/tasks?search=' + encodeURIComponent('день открытых дверей'));
+    assert.equal(taskByLowerTitle.status, 200);
+    assert.ok(taskByLowerTitle.data.some(t => t.title.includes('День открытых дверей')));
+
+    const taskByLowerLocation = await admin.request('/api/tasks?search=' + encodeURIComponent('актовый зал'));
+    assert.equal(taskByLowerLocation.status, 200);
+    assert.ok(taskByLowerLocation.data.some(t => t.location.includes('Актовый зал')));
+
+    const taskByYo = await admin.request('/api/tasks?search=' + encodeURIComponent('съемка первокурсников'));
+    assert.equal(taskByYo.status, 200);
+    assert.ok(taskByYo.data.some(t => t.title.includes('Осенний фотодень')));
+
+    // 3. Recruitment applications search (/api/recruitment/applications): lowercase FIO, public_id, department, 8-prefix phone
+    const recByLowerFio = await admin.request('/api/recruitment/applications?search=' + encodeURIComponent('романов кирилл'));
+    assert.equal(recByLowerFio.status, 200);
+    assert.ok(recByLowerFio.data.applications.some(a => a.full_name === 'Кирилл Романов'));
+
+    const recByLowerId = await admin.request('/api/recruitment/applications?search=' + encodeURIComponent('mc-v-0001'));
+    assert.equal(recByLowerId.status, 200);
+    assert.ok(recByLowerId.data.applications.some(a => a.public_id === 'MC-V-0001'));
+
+    const recByPhone8 = await admin.request('/api/recruitment/applications?search=' + encodeURIComponent('8 (916) 111-22-33'));
+    assert.equal(recByPhone8.status, 200);
+    assert.ok(recByPhone8.data.applications.some(a => a.public_id === 'MC-V-0001'));
+
+    // 4. Audit logs search (/api/audit?search=...)
+    const auditSearch = await admin.request('/api/audit?search=' + encodeURIComponent('мария соколова'));
+    assert.equal(auditSearch.status, 200);
+    assert.ok(auditSearch.data.length > 0);
+  });
 });
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Filter, Search, AlertTriangle } from 'lucide-react';
-import { api } from '../api.js';
+import { api, matchesSearch } from '../api.js';
 import { Page, Loader, Empty, PointRow } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -79,12 +79,17 @@ export default function RecordBook({ user }) {
 
   const filteredPoints = (data.points || []).filter((p) => {
     const matchesCategory = categoryFilter === 'ALL' || p.category === categoryFilter;
-    const matchesSearch =
-      !searchQuery.trim() ||
-      p.reason.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.task_title && p.task_title.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.issuer_name && p.issuer_name.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    const catLabel = CATEGORIES.find((c) => c.id === p.category)?.label || '';
+    const matchesQuery = matchesSearch(
+      searchQuery,
+      p.reason,
+      p.task_title,
+      p.issuer_name,
+      p.category,
+      catLabel,
+      p.amount
+    );
+    return matchesCategory && matchesQuery;
   });
 
   const completionCount = (data.points || []).filter((p) => p.category === 'COMPLETION' && p.is_reversed !== 1).length;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Filter, RefreshCw } from 'lucide-react';
+import { Filter, RefreshCw, Search } from 'lucide-react';
 import { api, formatDateTime } from '../api.js';
 import { Page, Loader, Empty } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -60,6 +60,8 @@ const ENTITY_LABELS = {
 export default function AdminAudit() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('ALL');
   const [entityFilter, setEntityFilter] = useState('ALL');
   const [expandedLogId, setExpandedLogId] = useState(null);
@@ -69,16 +71,18 @@ export default function AdminAudit() {
     setExpandedLogId(expandedLogId === id ? null : id);
   };
 
-  const loadAudit = async () => {
+  const loadAudit = async (showSpinner = !hasLoaded) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const query = new URLSearchParams();
       if (actionFilter !== 'ALL') query.set('action', actionFilter);
       if (entityFilter !== 'ALL') query.set('entity_type', entityFilter);
+      if (search.trim()) query.set('search', search.trim());
       query.set('limit', '250');
 
       const res = await api(`/audit?${query.toString()}`);
       setLogs(res);
+      setHasLoaded(true);
     } catch (err) {
       toast.error('Не удалось загрузить журнал аудита: ' + err.message);
     } finally {
@@ -87,21 +91,44 @@ export default function AdminAudit() {
   };
 
   useEffect(() => {
-    loadAudit();
-  }, [actionFilter, entityFilter]);
+    const delay = hasLoaded && search.trim() ? 180 : 0;
+    const timer = setTimeout(() => {
+      loadAudit(!hasLoaded);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [actionFilter, entityFilter, search]);
 
   return (
     <Page
       title="Журнал аудита безопасности"
       subtitle="Неизменяемая хроника всех ключевых событий системы: авторизации, назначения, начисления баллов и изменение ролей."
       actions={
-        <button className="btn ghost" onClick={loadAudit} disabled={loading}>
+        <button className="btn ghost" onClick={() => loadAudit(false)} disabled={loading}>
           <RefreshCw size={15} /> Обновить
         </button>
       }
     >
       {/* Filters Toolbar */}
       <div className="toolbar">
+        <form
+          className="search-box"
+          onSubmit={(e) => {
+            e.preventDefault();
+            loadAudit(false);
+          }}
+        >
+          <Search size={16} className="search-icon" />
+          <input
+            type="text"
+            placeholder="Поиск по пользователю, событию или деталям…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button type="submit" className="btn tiny primary">
+            Найти
+          </button>
+        </form>
+
         <div className="toolbar-filters">
           <div className="category-select-wrap">
             <Filter size={14} />

@@ -27,7 +27,7 @@ import {
   Medal,
   ArrowUpRight
 } from 'lucide-react';
-import { api, formatDate, relativeTime, formatDateTime } from '../api.js';
+import { api, formatDate, relativeTime, formatDateTime, matchesSearch } from '../api.js';
 import { Page, Loader, Empty, Avatar } from '../components/UI.jsx';
 import Modal from '../components/Modal.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -37,6 +37,7 @@ export default function Students({ user }) {
   const [students, setStudents] = useState([]);
   const [leaderboardRows, setLeaderboardRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const toast = useToast();
 
@@ -53,11 +54,12 @@ export default function Students({ user }) {
   const [awardCategory, setAwardCategory] = useState('BONUS');
   const [awarding, setAwarding] = useState(false);
 
-  const loadStudents = async () => {
+  const loadStudents = async (showSpinner = !hasLoaded) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const res = await api(`/users?role=STUDENT&status=ACTIVE&search=${encodeURIComponent(search.trim())}`);
       setStudents(res);
+      setHasLoaded(true);
     } catch (err) {
       toast.error('Не удалось загрузить медиаволонтёров: ' + err.message);
     } finally {
@@ -67,7 +69,7 @@ export default function Students({ user }) {
 
   const loadLeaderboard = async () => {
     try {
-      setLoading(true);
+      if (!leaderboardRows.length) setLoading(true);
       const res = await api('/leaderboard');
       setLeaderboardRows(res);
     } catch (err) {
@@ -79,11 +81,15 @@ export default function Students({ user }) {
 
   useEffect(() => {
     if (activeTab === 'directory') {
-      loadStudents();
+      const delay = hasLoaded && search.trim() ? 180 : 0;
+      const timer = setTimeout(() => {
+        loadStudents(!hasLoaded);
+      }, delay);
+      return () => clearTimeout(timer);
     } else {
       loadLeaderboard();
     }
-  }, [activeTab]);
+  }, [activeTab, search]);
 
   const handleOpenProfile = async (s) => {
     setSelectedStudent(s);
@@ -324,8 +330,21 @@ export default function Students({ user }) {
               {/* Leaderboard Table */}
               <div className="panel leaderboard-panel">
                 <div className="section-head">
-                  <h2>Таблица лидеров сезона</h2>
-                  <span className="muted">Всего медиаволонтёров: {leaderboardRows.length}</span>
+                  <div>
+                    <h2>Таблица лидеров сезона</h2>
+                    <span className="muted">Всего медиаволонтёров: {leaderboardRows.filter((r) => matchesSearch(search, r.first_name, r.last_name, r.group_name, r.year ? `${r.year} курс` : '', r.skills, r.bio)).length}</span>
+                  </div>
+                  <div className="toolbar-inline">
+                    <div className="search-box-inline">
+                      <Search size={14} />
+                      <input
+                        type="text"
+                        placeholder="Поиск по имени, группе или навыкам…"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="table-responsive">
@@ -340,7 +359,9 @@ export default function Students({ user }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {leaderboardRows.map((r) => (
+                      {leaderboardRows
+                        .filter((r) => matchesSearch(search, r.first_name, r.last_name, r.group_name, r.year ? `${r.year} курс` : '', r.skills, r.bio))
+                        .map((r) => (
                         <tr
                           key={r.id}
                           className={`leader-row ${r.id === user.id ? 'is-me' : ''}`}

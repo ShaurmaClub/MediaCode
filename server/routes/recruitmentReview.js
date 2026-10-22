@@ -42,9 +42,8 @@ app.get('/api/recruitment/applications', strictAuth, role('STAFF', 'ADMIN'), (re
   }
 
   if (search && search.trim()) {
-    sql += ' AND (ra.full_name LIKE ? OR ra.public_id LIKE ? OR ra.group_name LIKE ? OR ra.phone LIKE ? OR ra.max_contact LIKE ?)';
-    const term = `%${search.trim()}%`;
-    args.push(term, term, term, term, term);
+    sql += ' AND u_match(?, ra.full_name, ra.public_id, ra.department, ra.group_name, ra.phone, ra.max_contact, ra.comment, ra.submission_text, rt.name, rt.title, rt.slug) = 1';
+    args.push(search.trim());
   }
 
   sql += ' ORDER BY ra.created_at DESC';

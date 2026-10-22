@@ -36,9 +36,13 @@ app.get('/api/users', strictAuth, (req, res) => {
   }
 
   if (search && search.trim()) {
-    sql += ' AND (u.first_name LIKE ? OR u.last_name LIKE ? OR u.login LIKE ? OR u.group_name LIKE ? OR u.skills LIKE ? OR u.phone LIKE ? OR u.max_contact LIKE ?)';
-    const term = `%${search.trim()}%`;
-    args.push(term, term, term, term, term, term, term);
+    if (isStudent) {
+      sql += " AND u_match(?, u.first_name, u.last_name, u.middle_name, u.department, u.group_name, CASE WHEN u.year IS NOT NULL THEN u.year || ' курс' ELSE '' END, u.skills, u.bio) = 1";
+      args.push(search.trim());
+    } else {
+      sql += " AND u_match(?, u.first_name, u.last_name, u.middle_name, u.login, u.email, u.department, u.group_name, CASE WHEN u.year IS NOT NULL THEN u.year || ' курс' ELSE '' END, u.skills, u.bio, u.phone, u.max_contact) = 1";
+      args.push(search.trim());
+    }
   }
 
   sql += ' GROUP BY u.id ORDER BY points DESC, u.last_name ASC';

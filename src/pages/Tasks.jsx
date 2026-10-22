@@ -21,14 +21,15 @@ export default function Tasks({ user }) {
 
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [search, setSearch] = useState(initialSearch);
   const [category, setCategory] = useState('Все категории');
   const [statusTab, setStatusTab] = useState('ALL');
   const toast = useToast();
 
-  const loadTasks = async () => {
+  const loadTasks = async (showSpinner = !hasLoaded) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const query = new URLSearchParams();
       if (search.trim()) query.set('search', search.trim());
       if (category !== 'Все категории') query.set('category', category);
@@ -36,6 +37,7 @@ export default function Tasks({ user }) {
 
       const res = await api(`/tasks?${query.toString()}`);
       setTasks(res);
+      setHasLoaded(true);
     } catch (err) {
       toast.error('Не удалось загрузить список мероприятий: ' + err.message);
     } finally {
@@ -44,12 +46,16 @@ export default function Tasks({ user }) {
   };
 
   useEffect(() => {
-    loadTasks();
-  }, [statusTab, category]);
+    const delay = hasLoaded && search.trim() ? 180 : 0;
+    const timer = setTimeout(() => {
+      loadTasks(!hasLoaded);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [statusTab, category, search]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    loadTasks();
+    loadTasks(false);
   };
 
   return (

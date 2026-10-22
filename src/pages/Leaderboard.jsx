@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Trophy, Medal } from 'lucide-react';
-import { api } from '../api.js';
+import { Trophy, Medal, Search } from 'lucide-react';
+import { api, matchesSearch } from '../api.js';
 import { Page, Loader, Avatar } from '../components/UI.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 
@@ -21,6 +21,7 @@ const formatEventsWord = (count) => {
 export default function Leaderboard({ user }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const toast = useToast();
 
   useEffect(() => {
@@ -33,6 +34,18 @@ export default function Leaderboard({ user }) {
   if (loading) return <Loader text="Загружаем рейтинг медиаволонтёров…" />;
 
   const top3 = rows.slice(0, 3);
+  const filteredRows = rows.filter((r) =>
+    matchesSearch(
+      search,
+      r.first_name,
+      r.last_name,
+      r.login,
+      r.group_name,
+      r.year ? `${r.year} курс` : '',
+      r.skills,
+      r.bio
+    )
+  );
   
   return (
     <Page
@@ -110,8 +123,21 @@ export default function Leaderboard({ user }) {
       {/* Full Leaderboard Table */}
       <div className="panel leaderboard-panel">
         <div className="section-head">
-          <h2>Таблица лидеров сезона</h2>
-          <span className="muted">Всего медиаволонтёров: {rows.length}</span>
+          <div>
+            <h2>Таблица лидеров сезона</h2>
+            <span className="muted">Всего медиаволонтёров: {filteredRows.length}</span>
+          </div>
+          <div className="toolbar-inline">
+            <div className="search-box-inline">
+              <Search size={14} />
+              <input
+                type="text"
+                placeholder="Поиск по имени, группе или навыкам…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="table-responsive">
@@ -127,7 +153,7 @@ export default function Leaderboard({ user }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {filteredRows.map((r) => {
                 const isCurrent = r.id === user.id;
                 return (
                   <tr key={r.id} className={isCurrent ? 'current-user-row' : ''}>
