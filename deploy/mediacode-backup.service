@@ -1,0 +1,12 @@
+[Unit]
+Description=MediaCode Daily Backup (Production & Staging, isolated runtime users)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/bin/bash -c 'set -e; if [ -d "/opt/mediacode/production/current" ] && [ -f "/var/lib/mediacode/production/data/media.db" ]; then sudo -n -u mediacode-prod /usr/bin/env ENV_FILE=/var/lib/mediacode/production/.env DEPLOY_ENV=production /usr/bin/node /opt/mediacode/production/current/server/backup.js --with-uploads --reason=daily-timer; fi; if [ -d "/opt/mediacode/staging/current" ] && [ -f "/var/lib/mediacode/staging/data/media.db" ]; then sudo -n -u mediacode-stage /usr/bin/env ENV_FILE=/var/lib/mediacode/staging/.env DEPLOY_ENV=staging /usr/bin/node /opt/mediacode/staging/current/server/backup.js --with-uploads --reason=daily-timer; fi'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacode-backup

@@ -1,0 +1,38 @@
+[Unit]
+Description=MediaCode Production Server (kaiton.ru)
+After=network.target
+
+[Service]
+Type=simple
+User=mediacode-prod
+Group=mediacode-prod
+WorkingDirectory=/opt/mediacode/production/current
+EnvironmentFile=/var/lib/mediacode/production/.env
+Environment=NODE_ENV=production
+Environment=DEPLOY_ENV=production
+Environment=APP_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=4000
+ExecStart=/usr/bin/node /opt/mediacode/production/current/server/index.js
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/mediacode/production/data /var/lib/mediacode/production/uploads /var/lib/mediacode/production/backups
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacode-prod
+
+[Install]
+WantedBy=multi-user.target

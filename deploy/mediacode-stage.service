@@ -1,0 +1,39 @@
+[Unit]
+Description=MediaCode Staging Server (stage.kaiton.ru)
+After=network.target
+
+[Service]
+Type=simple
+User=mediacode-stage
+Group=mediacode-stage
+WorkingDirectory=/opt/mediacode/staging/current
+EnvironmentFile=/var/lib/mediacode/staging/.env
+Environment=NODE_ENV=production
+Environment=DEPLOY_ENV=staging
+Environment=APP_ENV=staging
+Environment=HOST=127.0.0.1
+Environment=PORT=4001
+ExecStart=/usr/bin/node /opt/mediacode/staging/current/server/index.js
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Безопасность процесса (Ubuntu 24.04 systemd hardening)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/mediacode/staging/data /var/lib/mediacode/staging/uploads /var/lib/mediacode/staging/backups
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacode-stage
+
+[Install]
+WantedBy=multi-user.target
