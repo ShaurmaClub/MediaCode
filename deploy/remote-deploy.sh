@@ -51,7 +51,15 @@ CURRENT_LINK="${ENV_ROOT}/current"
 PREVIOUS_LINK="${ENV_ROOT}/previous"
 STATE_DIR="${DATA_ROOT:-${BASE_DATA_DIR}/${DEPLOY_ENV}}"
 ENV_FILE="${STATE_DIR}/.env"
-LOCK_FILE="/tmp/mediacode-deploy-${DEPLOY_ENV}.lock"
+# Unit names must match the narrowly scoped sudoers entries exactly.
+SERVICE_NAME="${SERVICE_NAME%.service}.service"
+if [ "$DEPLOY_ENV" = production ]; then EXPECTED_SERVICE=mediacode-prod.service;
+else EXPECTED_SERVICE=mediacode-stage.service; fi
+[ "$SERVICE_NAME" = "$EXPECTED_SERVICE" ] || { echo 'Service/contour mismatch' >&2; exit 10; }
+for root in "$ENV_ROOT" "$STATE_DIR"; do
+  [[ "$root" = /* && "$root" != / && "$root" != *..* && "$root" != *' '* ]] || exit 10
+done
+LOCK_FILE="${ENV_ROOT}/.deploy.lock"
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -95,6 +103,12 @@ restart_contour_service() {
   fi
 }
 
+stop_contour_service() {
+  if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then return 0; fi
+  if [ "$(id -u)" -eq 0 ]; then systemctl stop "$SERVICE_NAME";
+  else sudo -n /bin/systemctl stop "$SERVICE_NAME"; fi
+}
+
 is_contour_service_active() {
   if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then
     return 0
@@ -102,7 +116,7 @@ is_contour_service_active() {
   if [ "$(id -u)" -eq 0 ]; then
     systemctl is-active --quiet "$SERVICE_NAME"
   else
-    sudo -n /bin/systemctl is-active --quiet "$SERVICE_NAME"
+    sudo -n /bin/systemctl is-active "$SERVICE_NAME" >/dev/null
   fi
 }
 
@@ -138,6 +152,21 @@ fi
 # ==============================================================================
 # ШАГ 1. ОБЯЗАТЕЛЬНЫЙ PRE-DEPLOY BACKUP (ОТ ИМЕНИ RUNTIME-ПОЛЬЗОВАТЕЛЯ)
 # ==============================================================================
+NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
+# Repeating the active SHA never touches its files, metadata, links or dependencies.
+if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ]; then
+  if is_contour_service_active && curl -fsS --max-time 5 "$HEALTH_URL" | EXPECTED_SHA="$TARGET_SHA" node -e '
+    let body=""; process.stdin.on("data", c => body += c);
+    process.stdin.on("end", () => { try { const d=JSON.parse(body);
+      process.exit(d.ok && d.db === "ok" && d.schemaCompatible && d.frontendReady && d.commit === process.env.EXPECTED_SHA ? 0 : 1);
+    } catch { process.exit(1); } });'; then
+    echo 'Active SHA already healthy; immutable release unchanged.'
+    exit 0
+  fi
+  echo 'Active SHA unhealthy; investigate or roll back. Release left unchanged.' >&2
+  exit 21
+fi
+
 if [ -n "$PREV_RELEASE_DIR" ] && run_as_runtime_user /bin/test -f "${STATE_DIR}/data/media.db"; then
   echo "💾 Шаг 1/6: Создание предрелизной резервной копии БД и загрузок..."
   run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=pre-deploy
@@ -168,30 +197,11 @@ cleanup_tmp() {
 trap cleanup_tmp EXIT
 
 prepare_isolated_release() {
-  # Защита от удаления активного релиза при повторном деплое того же самого SHA (P1 #6)
-  if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ] && [ -d "$NEW_RELEASE_DIR" ]; then
-    echo "ℹ️ Повторный деплой уже активного релиза ${TARGET_SHA}: сохраняем рабочий каталог без удаления."
-    if [ -n "$DIST_ARCHIVE" ] && [ -f "$DIST_ARCHIVE" ]; then
-      mkdir -p "${STAGE_BUILD_DIR}/dist" || return 1
-      tar -xzf "$DIST_ARCHIVE" -C "${STAGE_BUILD_DIR}/dist" || return 1
-      if [ ! -f "${STAGE_BUILD_DIR}/dist/index.html" ]; then
-        echo "❌ [DEPLOY] В архиве dist отсутствует dist/index.html!"
-        return 1
-      fi
-      rsync -a --delete "${STAGE_BUILD_DIR}/dist/" "${NEW_RELEASE_DIR}/dist/" || return 1
-      rm -rf "$STAGE_BUILD_DIR"
-    fi
-    ln -sfn "${STATE_DIR}/data" "${NEW_RELEASE_DIR}/data" || return 1
-    ln -sfn "${STATE_DIR}/uploads" "${NEW_RELEASE_DIR}/uploads" || return 1
-    cat > "${NEW_RELEASE_DIR}/.release-meta.json" <<EOF
-{
-  "sha": "${TARGET_SHA}",
-  "env": "${DEPLOY_ENV}",
-  "deployedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
-    printf '%s\n' "${TARGET_SHA}" > "${NEW_RELEASE_DIR}/.release-sha"
-    chmod -R u=rwX,g=rX,o= "$NEW_RELEASE_DIR" || return 1
+  # A previously prepared release is immutable too. Never repair it in place.
+  if [ -e "$NEW_RELEASE_DIR" ]; then
+    [ -f "$NEW_RELEASE_DIR/.release-sha" ] &&
+      [ "$(cat "$NEW_RELEASE_DIR/.release-sha")" = "$TARGET_SHA" ] &&
+      [ -f "$NEW_RELEASE_DIR/dist/index.html" ] || return 1
     return 0
   fi
 
@@ -244,9 +254,9 @@ EOF
 }
 EOF
   printf '%s\n' "${TARGET_SHA}" > "${STAGE_BUILD_DIR}/.release-sha"
+  chgrp -R "$RUNTIME_USER" "$STAGE_BUILD_DIR" || return 1
   chmod -R u=rwX,g=rX,o= "$STAGE_BUILD_DIR" || return 1
 
-  rm -rf "$NEW_RELEASE_DIR" || return 1
   mv "$STAGE_BUILD_DIR" "$NEW_RELEASE_DIR" || return 1
   return 0
 }
@@ -262,12 +272,21 @@ fi
 # ШАГ 4. ПРОВЕРКА И ПРИМЕНЕНИЕ МИГРАЦИЙ БД ДО ПЕРЕКЛЮЧЕНИЯ ТРАФИКА
 # ==============================================================================
 echo "🗄️ Шаг 4/6: Проверка совместимости и миграция схемы SQLite..."
+# Never let the old application write while the new code changes the schema.
+stop_contour_service || exit 21
+if [ -n "$PREV_RELEASE_DIR" ]; then
+  if ! run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=cutover; then
+    restart_contour_service || exit 31
+    exit 20
+  fi
+fi
 run_as_runtime_user APP_COMMIT_SHA="$TARGET_SHA" /usr/bin/node "${NEW_RELEASE_DIR}/server/migrate.js" --verify
 MIGRATE_RC=$?
 if [ "$MIGRATE_RC" -ne 0 ]; then
   echo "❌ [DEPLOY] Ошибка миграции или несовместимость схемы БД! Переключение релиза отменено."
-  if [ "$NEW_RELEASE_DIR" != "$PREV_RELEASE_DIR" ]; then
-    rm -rf "$NEW_RELEASE_DIR"
+  if [ -n "$PREV_RELEASE_DIR" ]; then
+    run_as_runtime_user /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback || exit 31
+    restart_contour_service || exit 31
   fi
   exit 21
 fi
@@ -283,7 +302,7 @@ if [ -n "$PREV_RELEASE_DIR" ] && [ "$PREV_RELEASE_DIR" != "$NEW_RELEASE_DIR" ]; 
   }
 fi
 
-ln -sfn "$NEW_RELEASE_DIR" "$CURRENT_LINK" || {
+ln -s "$NEW_RELEASE_DIR" "${CURRENT_LINK}.next.$$" && mv -Tf "${CURRENT_LINK}.next.$$" "$CURRENT_LINK" || {
   echo "❌ [DEPLOY] Не удалось обновить ссылку current"
   exit 21
 }
@@ -326,7 +345,20 @@ verify_release() {
           # 5b. Проверка отдачи фронтенда (/)
           if curl -fsS --max-time 4 "${BASE_URL}/" >/dev/null 2>&1; then
             # 7. Функциональная smoke-проверка публичного API
-            if curl -fsS --max-time 4 "${BASE_URL}/api/public/recruitment/track/photo" | grep -q '"slug":"photo"'; then
+            # A fresh production DB has no demo tracks; a correct JSON 404 is healthy too.
+            if curl -sS --max-time 4 -w '\n%{http_code}' "${BASE_URL}/api/public/recruitment/track/photo" | node -e '
+              let s=""; process.stdin.on("data", c=>s+=c); process.stdin.on("end",()=>{
+                try { const i=s.lastIndexOf("\n"), status=s.slice(i+1), d=JSON.parse(s.slice(0,i));
+                  process.exit((status==="200" && d.slug==="photo") || (status==="404" && typeof d.error==="string") ? 0 : 1);
+                } catch { process.exit(1); }
+              });'; then
+              if [ -n "${EXTERNAL_HEALTH_URL:-}" ]; then
+                curl -fsS --max-time 8 "$EXTERNAL_HEALTH_URL" | EXPECTED_SHA="$expected_sha" node -e '
+                  let s=""; process.stdin.on("data", c=>s+=c); process.stdin.on("end",()=>{
+                    try { const d=JSON.parse(s); process.exit(d.ok && d.commit===process.env.EXPECTED_SHA ? 0 : 1); }
+                    catch { process.exit(1); }
+                  });' || continue
+              fi
               echo "✅ Все 7 проверок работоспособности пройдены (попытка ${i}/${retries}):"
               echo "   ${health_json}"
               return 0
@@ -393,6 +425,7 @@ echo "⏪ Запуск автоматического отката на пред
 echo "ℹ️ База данных SQLite и пользовательские файлы сохраняются (без разрушительного перезаписывания)."
 
 # Проверяем, совместима ли текущая схема БД с предыдущим релизом
+stop_contour_service || exit 31
 run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback
 COMPAT_RC=$?
 if [ "$COMPAT_RC" -ne 0 ]; then
@@ -401,7 +434,7 @@ if [ "$COMPAT_RC" -ne 0 ]; then
   exit 31
 fi
 
-ln -sfn "$PREV_RELEASE_DIR" "$CURRENT_LINK"
+ln -s "$PREV_RELEASE_DIR" "${CURRENT_LINK}.rollback.$$" && mv -Tf "${CURRENT_LINK}.rollback.$$" "$CURRENT_LINK" || exit 31
 restart_contour_service
 RB_RESTART_RC=$?
 

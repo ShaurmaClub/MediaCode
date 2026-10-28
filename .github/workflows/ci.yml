@@ -2,7 +2,7 @@ name: MediaCode CI/CD (Ubuntu 24.04)
 
 on:
   push:
-    branches: [main, dev, "ci/**", "feat/**", "fix/**"]
+    branches: ['**']
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -165,7 +165,7 @@ jobs:
     name: "🚀 Deploy to Staging (stage.kaiton.ru)"
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && vars.CD_STAGING_ENABLED == 'true'
     concurrency:
       group: deploy-staging-environment
       cancel-in-progress: false
@@ -187,17 +187,13 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy-stage' }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/staging' }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-stage' }}
+          EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
         run: |
-          missing=()
-          [ -z "${SSH_HOST}" ] && missing+=("SSH_HOST")
-          [ -z "${SSH_PRIVATE_KEY}" ] && missing+=("SSH_PRIVATE_KEY")
-          [ -z "${SSH_KNOWN_HOSTS}" ] && missing+=("SSH_KNOWN_HOSTS")
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "❌ CRITICAL: В GitHub Environment 'staging' отсутствуют обязательные секреты: ${missing[*]}" >&2
-            echo "Запустите помощник настройки: bash deploy/setup-github.sh --host <IP_СЕРВЕРА>" >&2
-            echo "Подробная инструкция: deploy/INSTALL.md" >&2
-            exit 1
-          fi
+          bash deploy/validate-secrets.sh
 
       - name: Release-based Deploy to Staging (Ubuntu 24.04)
         id: deploy
@@ -290,7 +286,7 @@ jobs:
     name: "🚀 Deploy to Production (kaiton.ru)"
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CD_PRODUCTION_ENABLED == 'true'
     concurrency:
       group: deploy-production-environment
       cancel-in-progress: false
@@ -312,17 +308,13 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy-prod' }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/production' }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-prod' }}
+          EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
         run: |
-          missing=()
-          [ -z "${SSH_HOST}" ] && missing+=("SSH_HOST")
-          [ -z "${SSH_PRIVATE_KEY}" ] && missing+=("SSH_PRIVATE_KEY")
-          [ -z "${SSH_KNOWN_HOSTS}" ] && missing+=("SSH_KNOWN_HOSTS")
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "❌ CRITICAL: В GitHub Environment 'production' отсутствуют обязательные секреты: ${missing[*]}" >&2
-            echo "Запустите помощник настройки: bash deploy/setup-github.sh --host <IP_СЕРВЕРА>" >&2
-            echo "Подробная инструкция: deploy/INSTALL.md" >&2
-            exit 1
-          fi
+          bash deploy/validate-secrets.sh
 
       - name: Release-based Deploy to Production (Ubuntu 24.04)
         id: deploy

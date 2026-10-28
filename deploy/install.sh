@@ -63,6 +63,33 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+# A clean installer must not take over an existing host by accident.
+if [[ -f /etc/systemd/system/mediacode.service || -d /srv/services/MediaCode || -f /etc/caddy/Caddyfile ]]; then
+  err 'Existing installation/proxy detected. Use inspect-legacy.sh and MIGRATE_EXISTING.md.'
+  exit 10
+fi
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy; then
+  err 'Caddy is active; existing HTTPS must be reviewed before installing Nginx.'
+  exit 10
+fi
+if [[ ! -f /opt/mediacode/production/current/.release-sha ]]; then
+  if ss -Hltn '( sport = :80 or sport = :443 )' 2>/dev/null | read -r _; then
+    err 'HTTP/HTTPS ports already occupied; review other sites before installation.'
+    exit 10
+  fi
+fi
+if [[ -d /etc/nginx/sites-enabled ]]; then
+  OTHER_CONFIGS=$(find /etc/nginx/sites-enabled -mindepth 1 -maxdepth 1 ! -name default ! -name mediacode-kaiton.conf | wc -l)
+  if [[ "$OTHER_CONFIGS" -gt 0 ]]; then
+    err 'Other Nginx sites exist; review shared-host ownership, names and TLS before installation.'
+    exit 10
+  fi
+fi
+if command -v docker >/dev/null 2>&1 && [[ -n "$(docker ps -q 2>/dev/null)" ]]; then
+  err 'Other Docker applications are running; use an approved shared-host migration plan.'
+  exit 10
+fi
+
 # ------------------------------------------------------------------------------
 # 1. Проверка совместимости Ubuntu 24.04 LTS и системных ресурсов
 # ------------------------------------------------------------------------------
@@ -178,7 +205,7 @@ apt-get install -y \
 NEED_NODE=1
 if command -v node >/dev/null 2>&1; then
   CURRENT_NODE_MAJOR="$(node -v | sed 's/^v//' | cut -d. -f1)"
-  if [[ "${CURRENT_NODE_MAJOR}" -ge 20 ]]; then
+  if [[ "${CURRENT_NODE_MAJOR}" -eq 22 ]]; then
     ok "Node.js уже установлен: $(node -v)"
     NEED_NODE=0
   fi
@@ -238,9 +265,9 @@ ensure_contour_users "${STAGE_RUNTIME_USER}" "${STAGE_DEPLOY_USER}"
 SUDOERS_FILE="/etc/sudoers.d/mediacode-deploy"
 cat > "${SUDOERS_FILE}" <<EOF
 Defaults:${PROD_DEPLOY_USER},${STAGE_DEPLOY_USER} !requiretty
-${PROD_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-prod.service, /bin/systemctl reload mediacode-prod.service, /bin/systemctl status mediacode-prod.service, /bin/systemctl is-active mediacode-prod.service
+${PROD_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-prod.service, /bin/systemctl stop mediacode-prod.service, /bin/systemctl reload mediacode-prod.service, /bin/systemctl status mediacode-prod.service, /bin/systemctl is-active mediacode-prod.service
 ${PROD_DEPLOY_USER} ALL=(${PROD_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
-${STAGE_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-stage.service, /bin/systemctl reload mediacode-stage.service, /bin/systemctl status mediacode-stage.service, /bin/systemctl is-active mediacode-stage.service
+${STAGE_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-stage.service, /bin/systemctl stop mediacode-stage.service, /bin/systemctl reload mediacode-stage.service, /bin/systemctl status mediacode-stage.service, /bin/systemctl is-active mediacode-stage.service
 ${STAGE_DEPLOY_USER} ALL=(${STAGE_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
 EOF
 chmod 440 "${SUDOERS_FILE}"

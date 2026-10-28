@@ -270,7 +270,8 @@ export function startAutoBackup(db, log = console) {
 
 // Запуск как CLI: node server/backup.js [--with-uploads] [--reason=pre-deploy]
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { default: db } = await import('./db.js');
+  // A backup must capture the schema as it is, not apply db.js migrations first.
+  const db = new Database(process.env.DB_PATH || './data/media.db', { readonly: true, fileMustExist: true });
   const reasonArg = process.argv.find((a) => a.startsWith('--reason='))?.split('=')[1] || 'manual';
   const includeUploads = process.argv.includes('--with-uploads') || process.env.BACKUP_INCLUDE_UPLOADS !== '0';
 

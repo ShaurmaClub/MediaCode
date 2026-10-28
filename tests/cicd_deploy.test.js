@@ -125,6 +125,8 @@ describe('Production-Ready CI/CD, Migrations, Readiness & Backup/Restore Suite',
     const uploadedFilesOnDisk = fs.readdirSync(testUploadsDir).filter((f) => f.endsWith('.pdf'));
     assert.strictEqual(uploadedFilesOnDisk.length, 1, 'Загруженный PDF должен сохраниться в UPLOAD_DIR');
     const uploadedFileName = uploadedFilesOnDisk[0];
+    const publicFile = await request(app).get(`/uploads/recruitment/${uploadedFileName}`);
+    assert.strictEqual(publicFile.status, 404, 'Private uploads must not be served even without the new Nginx config');
 
     db.prepare('UPDATE users SET bio = ? WHERE id = 1').run('bio-before-backup');
 

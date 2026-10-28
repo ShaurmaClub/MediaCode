@@ -28,6 +28,9 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
+// Defense in depth for legacy Caddy deployments too: uploads are API-only.
+app.use('/uploads', (_req, res) => res.sendStatus(404));
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
