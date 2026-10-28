@@ -1,5 +1,9 @@
 # Лаборатория и статус подготовки
 
+Дополнение 29.10.2026: настоящая Ubuntu 22.04 + systemd/KVM и fault-injection
+проверены отдельно: [VAVILON_INFRA_RESULTS.md](VAVILON_INFRA_RESULTS.md).
+Ниже — прежний контейнерный прогон; его shim не доказывает systemd sandbox.
+
 Дата: 28.10.2026. Работа выполнена в review-ветке от `ci/cd-ubuntu24`, без merge и без переключения production. Основная лаборатория размещена **на Vavilon**, а не на ноутбуке.
 
 ## Окружение и границы

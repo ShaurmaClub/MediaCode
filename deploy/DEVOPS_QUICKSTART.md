@@ -1,10 +1,12 @@
 # MediaCode: пошаговая инструкция администратора
 
+Обновление 29.10: для первой миграции утверждены Ubuntu 22.04 и Caddy. Актуальная настройка Tailscale OIDC, Environments, immutable subject и порядок PR описаны в [VAVILON_OIDC.md](VAVILON_OIDC.md). Раздел лаборатории ниже описывает прежний контейнер; настоящий systemd проверяется сценарием `deploy/vm/`.
+
 Сейчас production не переносить и CD не включать. Начать с аудита и review. Отдельные разрешения нужны для правок systemd/proxy/SSH/firewall, переключения сайта и включения production CD.
 
 ## 1. GitHub: сначала выключатели
 
-В репозитории Settings → Secrets and variables → Actions → Variables создать **repository variables**:
+В репозитории Settings → Secrets and variables → Actions → Variables проверить существующие **repository variables**:
 
 ```text
 CD_STAGING_ENABLED=false
@@ -13,19 +15,16 @@ CD_PRODUCTION_ENABLED=false
 
 Отсутствующая переменная тоже выключает CD. Только точная строка `true` разрешает соответствующий job. Обычные PR/feature push никогда не деплоят. Lint, build, API/E2E tests, Gitleaks и audit выполняются независимо от этих выключателей.
 
-Review-ветка создана от `ci/cd-ubuntu24`: `fix/safe-legacy-migration-20261027`. Создать PR в `ci/cd-ubuntu24`, проверить diff/CI, затем отдельный согласованный PR в main. Автоматического merge нет. Не мержить исходный PR #4 в обход этих исправлений.
+Review-ветка `fix/safe-legacy-migration-20261027`, PR #5 уже создан в `ci/cd-ubuntu24`. Вручную review/merge #5 → проверить обновлённый #4 → подтвердить CD=false → вручную merge #4 в main → перенести workflow в dev → provisioning/manual check/staging CD → отдельный production cutover → отдельное включение production CD. Автоматического merge нет.
 
 ```bash
-gh auth login
-git push -u origin fix/safe-legacy-migration-20261027
-gh pr create --base ci/cd-ubuntu24 --head fix/safe-legacy-migration-20261027 \
-  --title 'Prepare safe legacy migration and gate CD' \
-  --body 'Preparation only. Review LEGACY_AUDIT.md, deploy/MIGRATE_EXISTING.md and deploy/LAB_RESULTS.md. Production cutover and CD activation require separate approval.'
+gh pr view 5 --repo ShaurmaClub/MediaCode
+gh pr checks 5 --repo ShaurmaClub/MediaCode
 ```
 
 ## 2. Environments и SSH
 
-Settings → Environments: создать `staging` и `production`. Для production включить required reviewers, запрет self-review при доступности настройки, разрешить deployment только из main. Для staging — только dev. Возможность обязательных reviewers зависит от плана/видимости репозитория; если недоступна, оставить production CD выключенным до согласованного эквивалентного контроля.
+Settings → Environments: `staging` и `production` уже созданы. Проверить required reviewers, запрет self-review при доступности настройки и branch rules: production только main, staging только dev. Если protection недоступна на текущем плане, оставить production CD выключенным до согласованного эквивалентного контроля.
 
 Создать отдельные ключи на доверенной административной машине (не сохранять в Git):
 
@@ -59,12 +58,14 @@ bash deploy/setup-github.sh --host HOST --port 22 \
 # та же команда с --apply вместо --check
 ```
 
-Помощник оставляет обе CD variables `false`. Проверка с ноутбука не доказывает доступность из runner. Для `100.81.97.45` нужен согласованный маршрут в tailnet: отдельный runner/явное подключение Actions к Tailscale. Наивный self-hosted runner на production с доступом к Docker опасен, особенно для непроверенных PR; не устанавливать его автоматически. Не открывать публичный SSH только ради Actions.
+Для `100.81.97.45` согласован GitHub-hosted runner с временным Tailscale OIDC-подключением. В каждом Environment добавить TS_OAUTH_CLIENT_ID/TS_AUDIENCE своей federated identity; legacy helper не настраивает trust и не заменяет ручной OIDC/SSH workflow. Следовать VAVILON_OIDC.md. Self-hosted runner и публичный SSH не использовать.
 
 ## 3. Secrets каждого Environment
 
 | Secret | staging | production |
 | --- | --- | --- |
+| TS_OAUTH_CLIENT_ID | staging federated identity | production federated identity |
+| TS_AUDIENCE | staging identity audience | production identity audience |
 | SSH_HOST | доступный именно runner адрес | доступный именно runner адрес |
 | SSH_PORT | подтверждённый SSH порт | подтверждённый SSH порт |
 | SSH_USER | deploy-stage | deploy-prod |
@@ -98,7 +99,7 @@ docker run --rm --cpus=2 --memory=3g --pids-limit=384 \
 
 ## 5. Переключение
 
-Использовать отдельный чек-лист из `MIGRATE_EXISTING.md`, раздел 5. Согласовать ОС/proxy. Не вызывать clean installer на Vavilon. После явного разрешения остановить старого writer, создать финальный согласованный snapshot и offsite backup, перенести данные в пустой production root с правильными правами, сохранить исходные файлы, мигрировать целевую БД и запустить новый unit. Caddy может остаться на том же upstream-порту; его замена не должна быть скрытым шагом миграции.
+Использовать отдельный чек-лист из `MIGRATE_EXISTING.md`, раздел 5. Ubuntu 22.04 и Caddy сохраняются. Не вызывать clean installer на Vavilon. После явного разрешения остановить старого writer, создать финальный согласованный snapshot и offsite backup, перенести данные в пустой production root с правильными правами, сохранить исходные файлы, мигрировать целевую БД и запустить новый unit на 127.0.0.1:4000. Caddy остаётся на том же upstream-порту.
 
 Проверки:
 
@@ -115,7 +116,8 @@ curl -I https://www.kaiton.ru/
 
 ## 6. Включение CD
 
-Только после успешного переноса и SSH probe из реального runner:
+Staging — после своего provisioning и manual OIDC/SSH probe из реального runner.
+Production — только после отдельного успешного cutover и приёмки:
 
 1. Отдельно разрешить staging CD и установить `CD_STAGING_ENABLED=true`.
 2. Выполнить согласованный push в dev, проверить backup → deploy → readiness → уведомление и сценарий отката.

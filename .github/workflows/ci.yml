@@ -69,6 +69,10 @@ jobs:
       - name: Run ESLint static analysis
         run: npm run lint
 
+      - name: Validate deployment shell syntax without executing provisioning
+        run: |
+          for script in deploy/*.sh deploy/vm/*.sh; do bash -n "$script"; done
+
       - name: Build production frontend bundle
         run: npm run build
 
@@ -166,6 +170,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && vars.CD_STAGING_ENABLED == 'true'
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: deploy-staging-environment
       cancel-in-progress: false
@@ -192,8 +199,27 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/staging' }}
           SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-stage' }}
           EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
+          REQUIRE_TAILSCALE: '1'
+          DEPLOY_ENV: staging
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
         run: |
           bash deploy/validate-secrets.sh
+
+      - name: Join staging tailnet using OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:mediacode-ci-stage
+          ping: ${{ secrets.SSH_HOST }}
+
+      - name: Verify staging tailnet identity and private peer route
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          EXPECTED_TS_TAG: tag:mediacode-ci-stage
+        run: node deploy/tailnet-check.mjs
 
       - name: Release-based Deploy to Staging (Ubuntu 24.04)
         id: deploy
@@ -212,6 +238,9 @@ jobs:
         run: |
           set +e
           umask 077
+          [ -n "${SSH_TARGET_IP:-}" ] || exit 10
+          SCP_TARGET="${SSH_TARGET_IP}"
+          [[ "$SCP_TARGET" != *:* ]] || SCP_TARGET="[$SCP_TARGET]"
           mkdir -p ~/.ssh
           printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_deploy
           printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
@@ -219,11 +248,13 @@ jobs:
 
           REMOTE_ARCHIVE="/tmp/mediacode-dist-${TARGET_SHA}.tar.gz"
           scp -i ~/.ssh/id_deploy -P "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            dist.tar.gz "${SSH_USER}@${SSH_HOST}:${REMOTE_ARCHIVE}"
+            dist.tar.gz "${SSH_USER}@${SCP_TARGET}:${REMOTE_ARCHIVE}"
           SCP_CODE=$?
           if [ "${SCP_CODE}" -ne 0 ]; then
             echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
@@ -233,11 +264,13 @@ jobs:
           fi
 
           ssh -i ~/.ssh/id_deploy -p "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            "${SSH_USER}@${SSH_HOST}" \
+            "${SSH_USER}@${SSH_TARGET_IP}" \
             "DEPLOY_ENV='staging' TARGET_SHA='${TARGET_SHA}' DEPLOY_PATH='${DEPLOY_PATH}' DATA_ROOT='${DATA_ROOT}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' EXTERNAL_HEALTH_URL='${EXTERNAL_HEALTH_URL}' DIST_ARCHIVE='${REMOTE_ARCHIVE}' bash -s" < deploy/remote-deploy.sh
           DEPLOY_CODE=$?
           rm -f ~/.ssh/id_deploy
@@ -279,6 +312,11 @@ jobs:
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
 
+      - name: Leave ephemeral staging node
+        if: always()
+        run: |
+          if command -v tailscale >/dev/null 2>&1; then sudo -n tailscale logout; fi
+
   # ============================================================================
   # 6. АВТОДЕПЛОЙ НА PRODUCTION (ветка main -> kaiton.ru)
   # ============================================================================
@@ -287,6 +325,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [security-and-packages, lint-and-build, tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CD_PRODUCTION_ENABLED == 'true'
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: deploy-production-environment
       cancel-in-progress: false
@@ -313,8 +354,27 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/production' }}
           SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-prod' }}
           EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
+          REQUIRE_TAILSCALE: '1'
+          DEPLOY_ENV: production
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
         run: |
           bash deploy/validate-secrets.sh
+
+      - name: Join production tailnet using OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:mediacode-ci-prod
+          ping: ${{ secrets.SSH_HOST }}
+
+      - name: Verify production tailnet identity and private peer route
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          EXPECTED_TS_TAG: tag:mediacode-ci-prod
+        run: node deploy/tailnet-check.mjs
 
       - name: Release-based Deploy to Production (Ubuntu 24.04)
         id: deploy
@@ -333,6 +393,9 @@ jobs:
         run: |
           set +e
           umask 077
+          [ -n "${SSH_TARGET_IP:-}" ] || exit 10
+          SCP_TARGET="${SSH_TARGET_IP}"
+          [[ "$SCP_TARGET" != *:* ]] || SCP_TARGET="[$SCP_TARGET]"
           mkdir -p ~/.ssh
           printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_deploy
           printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
@@ -340,11 +403,13 @@ jobs:
 
           REMOTE_ARCHIVE="/tmp/mediacode-dist-${TARGET_SHA}.tar.gz"
           scp -i ~/.ssh/id_deploy -P "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            dist.tar.gz "${SSH_USER}@${SSH_HOST}:${REMOTE_ARCHIVE}"
+            dist.tar.gz "${SSH_USER}@${SCP_TARGET}:${REMOTE_ARCHIVE}"
           SCP_CODE=$?
           if [ "${SCP_CODE}" -ne 0 ]; then
             echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
@@ -354,11 +419,13 @@ jobs:
           fi
 
           ssh -i ~/.ssh/id_deploy -p "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            "${SSH_USER}@${SSH_HOST}" \
+            "${SSH_USER}@${SSH_TARGET_IP}" \
             "DEPLOY_ENV='production' TARGET_SHA='${TARGET_SHA}' DEPLOY_PATH='${DEPLOY_PATH}' DATA_ROOT='${DATA_ROOT}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' EXTERNAL_HEALTH_URL='${EXTERNAL_HEALTH_URL}' DIST_ARCHIVE='${REMOTE_ARCHIVE}' bash -s" < deploy/remote-deploy.sh
           DEPLOY_CODE=$?
           rm -f ~/.ssh/id_deploy
@@ -399,3 +466,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+
+      - name: Leave ephemeral production node
+        if: always()
+        run: |
+          if command -v tailscale >/dev/null 2>&1; then sudo -n tailscale logout; fi

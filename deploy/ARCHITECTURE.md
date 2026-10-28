@@ -2,9 +2,9 @@
 
 В проекте принят единый, детерминированный production-стек без промежуточных контейнеров и неоднозначных режимов (`DEPLOY_MODE=auto` и PM2 исключены из production-контура):
 
-- **ОС:** Ubuntu Server 24.04 LTS
+- **ОС первой миграции Vavilon:** Ubuntu Server 22.04 LTS (24.04 остаётся вариантом будущей отдельной миграции)
 - **Runtime:** Node.js 22 LTS
-- **Reverse Proxy & TLS:** Nginx + Certbot (Let's Encrypt)
+- **Reverse Proxy & TLS на Vavilon:** существующий Caddy; Nginx/Certbot — только шаблон чистой установки, не применять к существующему серверу
 - **Управление процессами и задачами:** `systemd` (`mediacode-prod.service`, `mediacode-stage.service`, `mediacode-backup.timer`, `mediacode-monitor.timer`)
 - **База данных:** SQLite (`better-sqlite3`, режим `WAL`, таблица версий `schema_migrations`, чистый модуль констант `server/config/schema.js`)
 - **CI/CD:** GitHub Actions (`.github/workflows/ci.yml`) + Release-based CD (`deploy/remote-deploy.sh`)
@@ -13,7 +13,7 @@
 
 ## 1. Схема контуров и строгой изоляции
 
-На одном сервере Ubuntu 24.04 работают два полностью изолированных контура:
+Целевая release-структура на существующем Ubuntu 22.04 разделяет два контура (её provisioning/cutover требуют разрешения):
 
 | Параметр | Production | Staging |
 |---|---|---|
@@ -27,7 +27,7 @@
 | Каталог данных и `.env` | `/var/lib/mediacode/production` (`0700`) | `/var/lib/mediacode/staging` (`0700`) |
 | GitHub Environment | `production` | `staging` |
 
-Снаружи через межсетевой экран UFW открыты только SSH, `80/tcp` и `443/tcp`. Порты `4000` и `4001` слушают исключительно `127.0.0.1`. Прямой доступ к `/uploads/` на уровне Nginx закрыт (`deny all; return 404;`) — файлы заявок и отчётов выдаются только через авторизованные маршруты Express (`/api/recruitment/files/:id/download` и `/api/tasks/files/download`).
+Существующие UFW/SSH не меняются. CI подключается через Tailscale OIDC к приватному IP, затем использует OpenSSH Ed25519. Новые unit слушают только 127.0.0.1:4000/4001. Backend блокирует /uploads/ независимо от proxy; файлы выдаются через авторизованный API. Текущий старый listener и его firewall зафиксированы в LEGACY_AUDIT.md; их изменения сейчас не разрешены.
 
 ---
 

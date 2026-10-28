@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# МедиаКод — Release-Based CD Script для Ubuntu Server 24.04 LTS
+# МедиаКод — Release-Based CD Script для Ubuntu Server 22.04/24.04 LTS
 #
 # Коды возврата (для точной диагностики в GitHub Actions и уведомлениях):
 #   0  — Успешное обновление и прохождение всех 7 проверок работоспособности
 #   10 — Ошибка входных параметров или блокировки параллельного деплоя
-#   20 — Ошибка обязательного pre-deploy бэкапа (деплой заблокирован до изменений)
-#   21 — Ошибка подготовки релиза / зависимостей / миграции (активный релиз не затронут)
+#   20 — Ошибка обязательного backup (старый сервис не остановлен или восстановлен)
+#   21 — Ошибка подготовки/переключения/миграции (старый сервис сохранён/восстановлен)
 #   30 — Сбой новой версии -> АВТОМАТИЧЕСКИЙ ROLLBACK ВЫПОЛНЕН УСПЕШНО
 #   31 — КРИТИЧЕСКИЙ ИНЦИДЕНТ: Сбой новой версии И сбой автоматического Rollback
 # ==============================================================================
@@ -187,6 +187,7 @@ NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
 STAGE_BUILD_DIR="${RELEASES_DIR}/.${TARGET_SHA}.tmp.$$"
 
 cleanup_tmp() {
+  rm -f "${CURRENT_LINK}.next.$$" "${CURRENT_LINK}.recovery.$$" "${PREVIOUS_LINK}.next.$$"
   if [ -d "$STAGE_BUILD_DIR" ]; then
     rm -rf "$STAGE_BUILD_DIR"
   fi
@@ -271,48 +272,6 @@ fi
 # ==============================================================================
 # ШАГ 4. ПРОВЕРКА И ПРИМЕНЕНИЕ МИГРАЦИЙ БД ДО ПЕРЕКЛЮЧЕНИЯ ТРАФИКА
 # ==============================================================================
-echo "🗄️ Шаг 4/6: Проверка совместимости и миграция схемы SQLite..."
-# Never let the old application write while the new code changes the schema.
-stop_contour_service || exit 21
-if [ -n "$PREV_RELEASE_DIR" ]; then
-  if ! run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=cutover; then
-    restart_contour_service || exit 31
-    exit 20
-  fi
-fi
-run_as_runtime_user APP_COMMIT_SHA="$TARGET_SHA" /usr/bin/node "${NEW_RELEASE_DIR}/server/migrate.js" --verify
-MIGRATE_RC=$?
-if [ "$MIGRATE_RC" -ne 0 ]; then
-  echo "❌ [DEPLOY] Ошибка миграции или несовместимость схемы БД! Переключение релиза отменено."
-  if [ -n "$PREV_RELEASE_DIR" ]; then
-    run_as_runtime_user /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback || exit 31
-    restart_contour_service || exit 31
-  fi
-  exit 21
-fi
-
-# ==============================================================================
-# ШАГ 5. ПЕРЕКЛЮЧЕНИЕ АКТИВНОГО РЕЛИЗА И ПЕРЕЗАПУСК SYSTEMD
-# ==============================================================================
-echo "🔄 Шаг 5/6: Атомарное переключение current -> ${NEW_RELEASE_DIR} и перезапуск ${SERVICE_NAME}..."
-if [ -n "$PREV_RELEASE_DIR" ] && [ "$PREV_RELEASE_DIR" != "$NEW_RELEASE_DIR" ]; then
-  ln -sfn "$PREV_RELEASE_DIR" "$PREVIOUS_LINK" || {
-    echo "❌ [DEPLOY] Не удалось обновить ссылку previous"
-    exit 21
-  }
-fi
-
-ln -s "$NEW_RELEASE_DIR" "${CURRENT_LINK}.next.$$" && mv -Tf "${CURRENT_LINK}.next.$$" "$CURRENT_LINK" || {
-  echo "❌ [DEPLOY] Не удалось обновить ссылку current"
-  exit 21
-}
-
-restart_contour_service
-RESTART_RC=$?
-
-# ==============================================================================
-# ФУНКЦИЯ 7-СТУПЕНЧАТОЙ ПРОВЕРКИ РАБОТОСПОСОБНОСТИ РЕЛИЗА
-# ==============================================================================
 verify_release() {
   local expected_sha="$1"
   local retries="${VERIFY_RETRIES:-15}"
@@ -376,6 +335,89 @@ verify_release() {
   return 1
 }
 
+
+SERVICE_MAY_BE_STOPPED=0
+recover_previous() {
+  local intended_code="$1" reason="$2"
+  echo "RECOVERY: $reason; checking previous SHA $PREV_SHA (database is not restored)." >&2
+  if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ]; then
+    echo 'EMERGENCY 31: no previous release; manual intervention required.' >&2
+    return 31
+  fi
+  if ! run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback; then
+    stop_contour_service || true
+    echo 'EMERGENCY 31: previous schema/database cannot be verified; no data overwritten.' >&2
+    return 31
+  fi
+  if [ "$(readlink -f "$CURRENT_LINK" || true)" = "$PREV_RELEASE_DIR" ] && is_contour_service_active && verify_release "$PREV_SHA"; then
+    echo 'Previous service remained healthy.' >&2
+    return "$intended_code"
+  fi
+  if ! stop_contour_service; then
+    echo 'EMERGENCY 31: unable to stop service during recovery.' >&2
+    return 31
+  fi
+  if [ "$(readlink -f "$CURRENT_LINK" || true)" != "$PREV_RELEASE_DIR" ]; then
+    if ! ln -s "$PREV_RELEASE_DIR" "${CURRENT_LINK}.recovery.$$" || ! mv -Tf "${CURRENT_LINK}.recovery.$$" "$CURRENT_LINK"; then
+      echo 'EMERGENCY 31: unable to restore current link; no database changes attempted.' >&2
+      return 31
+    fi
+  fi
+  if ! restart_contour_service || ! verify_release "$PREV_SHA"; then
+    echo 'EMERGENCY 31: previous service failed restart/readiness; operator recovery required.' >&2
+    return 31
+  fi
+  echo "RECOVERED: previous SHA $PREV_SHA healthy; exit $intended_code." >&2
+  return "$intended_code"
+}
+fail_after_stop() {
+  local intended_code="$1" reason="$2" recovered
+  trap - EXIT INT TERM
+  recover_previous "$intended_code" "$reason"
+  recovered=$?
+  cleanup_tmp
+  exit "$recovered"
+}
+exit_guard() {
+  local rc="$1"
+  if [ "$SERVICE_MAY_BE_STOPPED" = 1 ]; then fail_after_stop 21 "unexpected exit $rc during cutover"; fi
+  cleanup_tmp
+}
+trap 'exit_guard $?' EXIT
+trap 'fail_after_stop 21 "cutover interrupted by signal"' INT TERM
+
+echo "🗄️ Шаг 4/6: Проверка совместимости и миграция схемы SQLite..."
+# Never let the old application write while the new code changes the schema.
+SERVICE_MAY_BE_STOPPED=1
+stop_contour_service || fail_after_stop 21 "systemctl stop failed"
+if [ -n "$PREV_RELEASE_DIR" ]; then
+  if ! run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=cutover; then
+    fail_after_stop 20 "final backup failed"
+  fi
+fi
+run_as_runtime_user APP_COMMIT_SHA="$TARGET_SHA" /usr/bin/node "${NEW_RELEASE_DIR}/server/migrate.js" --verify
+MIGRATE_RC=$?
+if [ "$MIGRATE_RC" -ne 0 ]; then
+  fail_after_stop 21 "SQLite migration failed"
+fi
+
+# ==============================================================================
+# ШАГ 5. ПЕРЕКЛЮЧЕНИЕ АКТИВНОГО РЕЛИЗА И ПЕРЕЗАПУСК SYSTEMD
+# ==============================================================================
+echo "🔄 Шаг 5/6: Атомарное переключение current -> ${NEW_RELEASE_DIR} и перезапуск ${SERVICE_NAME}..."
+if [ -n "$PREV_RELEASE_DIR" ] && [ "$PREV_RELEASE_DIR" != "$NEW_RELEASE_DIR" ]; then
+  ln -s "$PREV_RELEASE_DIR" "${PREVIOUS_LINK}.next.$$" && mv -Tf "${PREVIOUS_LINK}.next.$$" "$PREVIOUS_LINK" || fail_after_stop 21 "previous link preparation failed"
+fi
+
+ln -s "$NEW_RELEASE_DIR" "${CURRENT_LINK}.next.$$" && mv -Tf "${CURRENT_LINK}.next.$$" "$CURRENT_LINK" || fail_after_stop 21 "current link switch failed"
+
+restart_contour_service
+RESTART_RC=$?
+
+# ==============================================================================
+# ФУНКЦИЯ 7-СТУПЕНЧАТОЙ ПРОВЕРКИ РАБОТОСПОСОБНОСТИ РЕЛИЗА
+# ==============================================================================
+
 if [ "$RESTART_RC" -eq 0 ]; then
   verify_release "$TARGET_SHA"
   VERIFY_RC=$?
@@ -388,6 +430,7 @@ fi
 # ШАГ 6. УСПЕШНОЕ ЗАВЕРШЕНИЕ И ОЧИСТКА УСТАРЕВШИХ РЕЛИЗОВ
 # ==============================================================================
 if [ "$VERIFY_RC" -eq 0 ]; then
+  SERVICE_MAY_BE_STOPPED=0
   echo "🧹 Шаг 6/6: Очистка устаревших релизов (храним последние ${KEEP_RELEASES})..."
   CURRENT_REAL="$(readlink -f "$CURRENT_LINK" || true)"
   PREVIOUS_REAL="$(readlink -f "$PREVIOUS_LINK" || true)"
@@ -414,41 +457,4 @@ fi
 # ==============================================================================
 # АВАРИЙНЫЙ ROLLBACK (БЕЗ ПЕРЕЗАПИСИ ПОЛЬЗОВАТЕЛЬСКИХ ДАННЫХ В БД)
 # ==============================================================================
-echo "🚨 СБОЙ ДЕПЛОЯ: Новая версия (${TARGET_SHA}) не прошла проверки работоспособности!"
-
-if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ] || [ "$PREV_RELEASE_DIR" = "$NEW_RELEASE_DIR" ]; then
-  echo "❌ Предыдущий отличный релиз отсутствует — автоматический откат невозможен!"
-  exit 31
-fi
-
-echo "⏪ Запуск автоматического отката на предыдущий рабочий релиз ${PREV_SHA} (${PREV_RELEASE_DIR})..."
-echo "ℹ️ База данных SQLite и пользовательские файлы сохраняются (без разрушительного перезаписывания)."
-
-# Проверяем, совместима ли текущая схема БД с предыдущим релизом
-stop_contour_service || exit 31
-run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback
-COMPAT_RC=$?
-if [ "$COMPAT_RC" -ne 0 ]; then
-  echo "❌ КРИТИЧЕСКАЯ ОШИБКА: Схема БД несовместима с предыдущим релизом ${PREV_SHA}!"
-  echo "   Требуется ручное восстановление по инструкции deploy/DISASTER_RECOVERY.md."
-  exit 31
-fi
-
-ln -s "$PREV_RELEASE_DIR" "${CURRENT_LINK}.rollback.$$" && mv -Tf "${CURRENT_LINK}.rollback.$$" "$CURRENT_LINK" || exit 31
-restart_contour_service
-RB_RESTART_RC=$?
-
-if [ "$RB_RESTART_RC" -eq 0 ]; then
-  verify_release "$PREV_SHA"
-  RB_VERIFY_RC=$?
-else
-  RB_VERIFY_RC=1
-fi
-
-if [ "$RB_VERIFY_RC" -eq 0 ]; then
-  echo "✅ АВТОМАТИЧЕСКИЙ ROLLBACK ВЫПОЛНЕН: Работа сервиса восстановлена на релизе ${PREV_SHA}."
-  exit 30
-else
-  echo "🔥 КРИТИЧЕСКИЙ ИНЦИДЕНТ: Автоматический Rollback на ${PREV_SHA} НЕ УДАЛСЯ!"
-  exit 31
-fi
+fail_after_stop 30 "new release restart/readiness failed"
