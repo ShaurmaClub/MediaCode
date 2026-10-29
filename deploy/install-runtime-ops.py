@@ -31,8 +31,13 @@ def main():
     if not (source / 'node_modules/better-sqlite3/build/Release/better_sqlite3.node').is_file():
         raise ValueError('build trusted native dependency before installation')
     for directory in (broker.LIB, broker.BROKER.parent, broker.NODE.parent):
+        created = not directory.exists()
         directory.mkdir(parents=True, exist_ok=True, mode=0o755)
         broker.trusted(directory)
+        if created:
+            # Provisioning has umask 077; helpers contain no secrets and runtime
+            # must be able to traverse this admin-owned parent after dropping UID.
+            directory.chmod(0o755)
     if not broker.NODE.exists():
         # Ubuntu/Node installations may have a root-owned /usr/bin/node symlink.
         node_source = Path('/usr/bin/node').resolve()
