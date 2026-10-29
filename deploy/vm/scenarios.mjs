@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
+import { inventory } from '../release-integrity.mjs';
 const root = '/srv/review';
 if (!fs.existsSync('/etc/mediacode-lab-vm') || fs.readFileSync('/etc/hostname', 'utf8').trim() !== 'mediacode-vm-lab') process.exit(90);
 function run(cmd, args = [], env = {}, expected = 0) {
@@ -22,8 +23,9 @@ run('systemctl', ['daemon-reload']); run('systemctl', ['start', 'mediacode']);
 const legacyPid = run('systemctl', ['show', 'mediacode', '-p', 'MainPID', '--value']);
 fs.mkdirSync('/tmp/vm-keys', { mode: 0o700 });
 for (const user of ['prod', 'stage']) run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', `/tmp/vm-keys/${user}`]);
-const provision = ['deploy/provision-vavilon.sh', '--legacy-dir', legacy, '--prod-key', '/tmp/vm-keys/prod.pub', '--stage-key', '/tmp/vm-keys/stage.pub'];
+const provision = ['deploy/provision-vavilon.sh', '--legacy-dir', legacy, '--prod-key', '/tmp/vm-keys/prod.pub', '--stage-key', '/tmp/vm-keys/stage.pub', '--runtime-source', root];
 run('bash', [...provision, '--check']);
+run('bash', ['deploy/provision-vavilon.sh', '--check', '--legacy-dir', legacy, '--prod-key', '/tmp/vm-keys/prod.pub', '--stage-key', '/tmp/vm-keys/prod.pub'], {}, 10);
 run('bash', [...provision, '--apply'], {}, 10);
 fs.chmodSync(legacy, 0o700); // Separate, explicit administrator permission change in synthetic lab only.
 run('bash', [...provision, '--apply']);
@@ -55,13 +57,17 @@ for (const sha of [old, next, bad]) {
   const dest = `${opt}/releases/${sha}`;
   fs.mkdirSync(dest);
   run('bash', ['-c', 'tar --exclude=.git --exclude=node_modules --exclude=.npm-cache --exclude=data --exclude=uploads -cf - . | tar -xf - -C "$1"', 'copy', dest]);
-  fs.symlinkSync(`${root}/node_modules`, `${dest}/node_modules`);
+  run('cp', ['-a', '--reflink=auto', `${root}/node_modules`, `${dest}/node_modules`]);
   fs.symlinkSync(`${data}/data`, `${dest}/data`); fs.symlinkSync(`${data}/uploads`, `${dest}/uploads`);
   fs.writeFileSync(`${dest}/.release-sha`, sha + '\n');
   fs.writeFileSync(`${dest}/.release-meta.json`, JSON.stringify({ sha, env: 'production' }));
   run('chown', ['-R', 'deploy-prod:mediacode-prod', dest]); run('chmod', ['-R', 'u=rwX,g=rX,o=', dest]);
 }
 fs.writeFileSync(`${opt}/releases/${bad}/server/index.js`, 'throw new Error("VM readiness failure");\n');
+for (const sha of [old, next, bad]) {
+  fs.writeFileSync(`${opt}/releases/${sha}/.release-inventory.json`, JSON.stringify(inventory(`${opt}/releases/${sha}`)));
+  run('chown', ['deploy-prod:mediacode-prod', `${opt}/releases/${sha}/.release-inventory.json`]);
+}
 const envFile = `${data}/.env`;
 fs.writeFileSync(envFile, `NODE_ENV=production\nHOST=127.0.0.1\nPORT=4000\nDB_PATH=${data}/data/media.db\nUPLOAD_DIR=${data}/uploads/recruitment\nUPLOADS_DIR=${data}/uploads/recruitment\nBACKUP_DIR=${data}/backups\nSESSION_SECRET=${crypto.randomBytes(32).toString('hex')}\n`);
 fs.writeFileSync('/var/lib/mediacode/staging/.env', 'LAB_ONLY=synthetic\n', { mode: 0o600 });
@@ -71,6 +77,9 @@ run('runuser', ['-u', 'mediacode-prod', '--', 'env', `ENV_FILE=${envFile}`, `DB_
 const db = new Database(`${data}/data/media.db`); db.exec('CREATE TABLE lab_preserve(n INTEGER); INSERT INTO lab_preserve VALUES (1)'); db.close();
 run('chown', ['mediacode-prod:mediacode-prod', `${data}/data/media.db`]);
 const baseline = '/root/mediacode-lab-baseline.db';
+fs.chmodSync(`${data}/data/media.db`, 0o600);
+fs.writeFileSync(`${data}/uploads/recruitment/synthetic.txt`, 'synthetic upload; must survive every deployment\n');
+run('chown', ['mediacode-prod:mediacode-prod', `${data}/uploads/recruitment/synthetic.txt`]);
 fs.copyFileSync(`${data}/data/media.db`, baseline);
 for (const unit of ['mediacode-prod', 'mediacode-stage']) fs.copyFileSync(`${root}/deploy/${unit}.service`, `/etc/systemd/system/${unit}.service`);
 run('systemctl', ['daemon-reload']);
@@ -101,7 +110,7 @@ assert.ok(run('journalctl', ['-u', 'mediacode-prod', '-n', '10', '--no-pager']).
 console.log('PASS real systemd sandbox, allowed/denied writes, journal, automatic Restart and actual stop/start');
 
 fs.mkdirSync('/tmp/vm-fault-bin');
-for (const cmd of ['ln', 'mv', 'systemctl', 'curl']) fs.symlinkSync(`${root}/deploy/vm/fault-command.sh`, `/tmp/vm-fault-bin/${cmd}`);
+for (const cmd of ['ln', 'mv', 'sudo', 'curl']) fs.symlinkSync(`${root}/deploy/vm/fault-command.sh`, `/tmp/vm-fault-bin/${cmd}`);
 run('chmod', ['755', `${root}/deploy/vm/fault-command.sh`]);
 function deploy(sha, fault, expected) {
   const command = fault ? 'bash' : 'runuser';
@@ -109,20 +118,52 @@ function deploy(sha, fault, expected) {
   run(command, args, { DEPLOY_ENV: 'production', TARGET_SHA: sha, FAULT_CASE: fault,
     PATH: `/tmp/vm-fault-bin:${process.env.PATH}`, VERIFY_RETRIES: '2', VERIFY_WAIT_SEC: '1' }, expected);
 }
-deploy(old, '', 0); assert.equal(health().commit, old);
-reset(); deploy(next, '', 0); assert.equal(health().commit, next);
+function userData() {
+  const file = fs.existsSync(`${data}/data/media.db`) ? `${data}/data/media.db` : `${data}/data/hidden.db`;
+  const db = new Database(file, { readonly: true });
+  const snapshot = JSON.stringify(db.prepare('SELECT n FROM lab_preserve ORDER BY n').all()); db.close();
+  const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  return { snapshot, env: hash(envFile), upload: hash(`${data}/uploads/recruitment/synthetic.txt`) };
+}
+const expectedData = userData();
+function unchanged() { assert.deepEqual(userData(), expectedData); }
+function releaseState() {
+  return JSON.stringify({ tree: inventory(`${opt}/releases/${old}`), current: fs.readlinkSync(`${opt}/current`),
+    pid: run('systemctl', ['show', 'mediacode-prod', '-p', 'MainPID', '--value']),
+    backups: fs.readdirSync(`${data}/backups`).sort(),
+    marker: fs.statSync(`${opt}/releases/${old}/.release-meta.json`).mtimeMs });
+}
+const beforeNoop = releaseState();
+deploy(old, '', 0); assert.equal(health().commit, old); unchanged(); assert.equal(releaseState(), beforeNoop);
+const entry = `${opt}/releases/${old}/dist/index.html`, originalEntry = fs.readFileSync(entry);
+fs.writeFileSync(entry, 'damaged synthetic artifact');
+const damaged = releaseState();
+deploy(old, '', 21); assert.equal(releaseState(), damaged); unchanged();
+fs.writeFileSync(entry, originalEntry); // Explicit lab-fixture repair only, never in deployment.
+const nextState = JSON.stringify(inventory(`${opt}/releases/${next}`));
+reset(); deploy(next, '', 0); assert.equal(health().commit, next); unchanged();
+assert.equal(JSON.stringify(inventory(`${opt}/releases/${next}`)), nextState);
+assert.ok(fs.existsSync(`${opt}/releases/${old}`));
 console.log('PASS healthy repeated SHA and normal release as actual non-root deploy-prod');
-for (const fault of ['previous-ln', 'previous-mv', 'current-ln', 'current-mv', 'stop', 'restart']) {
+reset(); fs.mkdirSync(`${opt}/releases/${'d'.repeat(40)}`);
+deploy('d'.repeat(40), '', 21); assert.equal(health().commit, old); unchanged();
+console.log('PASS active healthy/damaged SHA, existing inactive SHA, prepare failure, immutable files/data');
+for (const fault of ['previous-ln', 'previous-mv', 'current-ln', 'current-mv', 'stop', 'restart', 'interrupt']) {
   reset(); deploy(next, fault, fault === 'restart' ? 30 : 21);
-  assert.equal(health().commit, old); console.log(`PASS ${fault}: previous service restored with real systemd`);
+  assert.equal(health().commit, old); unchanged();
+  deploy(next, '', 0); assert.equal(health().commit, next); unchanged();
+  assert.ok(fs.existsSync(`${opt}/releases/${old}`));
+  console.log(`PASS ${fault}: previous service restored, data retained, subsequent retry succeeds`);
 }
 reset(); deploy(bad, 'readiness', 30); assert.equal(health().commit, old);
 const preserved = new Database(`${data}/data/media.db`, { readonly: true });
 assert.equal(preserved.prepare('SELECT COUNT(*) AS n FROM lab_preserve WHERE n=999').get().n, 1); preserved.close();
+assert.equal(userData().env, expectedData.env); assert.equal(userData().upload, expectedData.upload);
 console.log('PASS readiness rollback keeps writes made after final backup (no DB restore)');
 for (const fault of ['db-unavailable', 'future-schema', 'restart-all', 'health']) {
-  reset(); deploy(next, fault, 31); console.log(`PASS ${fault}: explicit emergency 31, no destructive restore`);
+  reset(); deploy(next, fault, 31); unchanged(); console.log(`PASS ${fault}: explicit emergency 31, no destructive restore`);
 }
 reset();
 assert.equal(run('systemctl', ['show', 'mediacode', '-p', 'MainPID', '--value']), legacyPid);
 console.log('PASS all VM fault scenarios; unrelated legacy service PID preserved');
+await import('./security-scenarios.mjs');

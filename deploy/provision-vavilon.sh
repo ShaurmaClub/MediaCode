@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Explicit preparation for EXISTING Ubuntu/Caddy hosts; no application/service cutover.
 set -euo pipefail
-mode='' legacy='' prod_key='' stage_key=''
+mode='' legacy='' prod_key='' stage_key='' runtime_source=''
 while (($#)); do
   case "$1" in
     --check|--apply) [[ -z "$mode" ]] || exit 10; mode="$1"; shift;;
     --legacy-dir) legacy="${2:?}"; shift 2;;
     --prod-key) prod_key="${2:?}"; shift 2;;
     --stage-key) stage_key="${2:?}"; shift 2;;
+    --runtime-source) runtime_source="${2:?}"; shift 2;;
     --help) echo 'provision-vavilon.sh --check|--apply --legacy-dir /srv/services/MediaCode [--prod-key prod.pub --stage-key stage.pub]'; exit 0;;
     *) echo 'Unknown/incomplete provisioning option' >&2; exit 10;;
   esac
@@ -70,6 +71,7 @@ fi
 [[ "$EUID" = 0 ]] || fail '--apply requires administrator'
 [[ "$legacy_open" = 0 ]] || fail 'approve and execute legacy permission plan separately before creating staging accounts'
 [[ -f "$prod_key" && -f "$stage_key" ]] || fail 'two approved public keys required'
+[[ -d "$runtime_source/server" && -d "$runtime_source/node_modules" ]] || fail '--runtime-source must name a frozen root-owned reviewed snapshot with built dependencies'
 umask 077
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
@@ -92,13 +94,7 @@ if ! grep -qxF "$ssh_include" "$scratch/sshd_config"; then printf '\nInclude %s/
 else sed -i "s|^$ssh_include\$|Include $scratch/sshd-users|" "$scratch/sshd_config"; fi
 sshd -t -f "$scratch/sshd_config" || fail 'candidate sshd config invalid'
 if [[ -f /etc/ssh/mediacode-deploy.conf ]]; then cmp -s /etc/ssh/mediacode-deploy.conf "$scratch/sshd-users" || fail 'existing deploy SSH policy differs; review before overwrite'; fi
-# Keep all root commands restricted to the single Environment service.
-for suffix in prod stage; do
-  printf 'deploy-%s ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-%s.service, /bin/systemctl stop mediacode-%s.service, /bin/systemctl start mediacode-%s.service, /bin/systemctl status mediacode-%s.service, /bin/systemctl is-active mediacode-%s.service\n' "$suffix" "$suffix" "$suffix" "$suffix" "$suffix" "$suffix"
-  printf 'deploy-%s ALL=(mediacode-%s) NOPASSWD: /usr/bin/env, /usr/bin/node, /bin/test\n' "$suffix" "$suffix"
-done > "$scratch/sudoers"
-# Validate syntax before installing; unknown users may warn before their creation.
-visudo -cf "$scratch/sudoers" || fail 'candidate sudoers invalid'
+# Install/validate the admin-owned helper and scoped sudo policy after account creation.
 for suffix in prod stage; do
   runtime="mediacode-$suffix"; deploy="deploy-$suffix"
   id "$runtime" >/dev/null 2>&1 || useradd --system --user-group --shell /usr/sbin/nologin "$runtime"
@@ -117,7 +113,7 @@ for suffix in prod stage; do
   install -d -m 700 -o "$runtime" -g "$runtime" "/var/lib/mediacode/$contour"
   for dir in data uploads uploads/recruitment backups; do install -d -m 750 -o "$runtime" -g "$runtime" "/var/lib/mediacode/$contour/$dir"; done
 done
-install -m 440 "$scratch/sudoers" /etc/sudoers.d/mediacode-deploy
+/usr/bin/python3 -I "$(dirname "$0")/install-runtime-ops.py" "$runtime_source"
 install -m 600 "$scratch/sshd-users" /etc/ssh/mediacode-deploy.conf
 if ! grep -qxF "$ssh_include" /etc/ssh/sshd_config; then
   cp -p /etc/ssh/sshd_config "/etc/ssh/sshd_config.before-mediacode-$(date +%Y%m%d%H%M%S)"

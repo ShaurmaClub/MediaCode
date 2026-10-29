@@ -60,6 +60,9 @@ for root in "$ENV_ROOT" "$STATE_DIR"; do
   [[ "$root" = /* && "$root" != / && "$root" != *..* && "$root" != *' '* ]] || exit 10
 done
 LOCK_FILE="${ENV_ROOT}/.deploy.lock"
+[[ "$ENV_ROOT" = "/opt/mediacode/$DEPLOY_ENV" && "$STATE_DIR" = "/var/lib/mediacode/$DEPLOY_ENV" ]] || { echo 'Noncanonical deployment roots rejected' >&2; exit 10; }
+[[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]] || exit 10
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -67,58 +70,12 @@ if ! flock -n 9; then
   exit 10
 fi
 
-# Выполнение команд, требующих доступа к .env / SQLite / uploads, от имени изолированного runtime-пользователя (P1 #4)
-run_as_runtime_user() {
-  if [ "${RUN_AS_CURRENT_USER:-0}" = "1" ] || [ "$(id -un)" = "$RUNTIME_USER" ]; then
-    /usr/bin/env \
-      ENV_FILE="$ENV_FILE" \
-      DEPLOY_ENV="$DEPLOY_ENV" \
-      APP_ENV="$DEPLOY_ENV" \
-      DB_PATH="${STATE_DIR}/data/media.db" \
-      UPLOAD_DIR="${STATE_DIR}/uploads/recruitment" \
-      UPLOADS_DIR="${STATE_DIR}/uploads/recruitment" \
-      BACKUP_DIR="${STATE_DIR}/backups" \
-      "$@"
-  else
-    sudo -n -u "$RUNTIME_USER" /usr/bin/env \
-      ENV_FILE="$ENV_FILE" \
-      DEPLOY_ENV="$DEPLOY_ENV" \
-      APP_ENV="$DEPLOY_ENV" \
-      DB_PATH="${STATE_DIR}/data/media.db" \
-      UPLOAD_DIR="${STATE_DIR}/uploads/recruitment" \
-      UPLOADS_DIR="${STATE_DIR}/uploads/recruitment" \
-      BACKUP_DIR="${STATE_DIR}/backups" \
-      "$@"
-  fi
-}
-
-restart_contour_service() {
-  if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then
-    return 0
-  fi
-  if [ "$(id -u)" -eq 0 ]; then
-    systemctl restart "$SERVICE_NAME"
-  else
-    sudo -n /bin/systemctl restart "$SERVICE_NAME"
-  fi
-}
-
-stop_contour_service() {
-  if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then return 0; fi
-  if [ "$(id -u)" -eq 0 ]; then systemctl stop "$SERVICE_NAME";
-  else sudo -n /bin/systemctl stop "$SERVICE_NAME"; fi
-}
-
-is_contour_service_active() {
-  if [ "${SKIP_SYSTEMCTL:-0}" = "1" ]; then
-    return 0
-  fi
-  if [ "$(id -u)" -eq 0 ]; then
-    systemctl is-active --quiet "$SERVICE_NAME"
-  else
-    sudo -n /bin/systemctl is-active "$SERVICE_NAME" >/dev/null
-  fi
-}
+# Runtime operations execute only admin-owned code, never the release's scripts.
+# No interpreter, arbitrary command, custom data root or runtime sudo is granted.
+runtime_op() { sudo -n /usr/local/sbin/mediacode-ops "$DEPLOY_ENV" "$@"; }
+restart_contour_service() { runtime_op restart; }
+stop_contour_service() { runtime_op stop; }
+is_contour_service_active() { runtime_op is-active; }
 
 echo "=================================================================="
 echo "🚀 Старт Release-Based деплоя МедиаКод"
@@ -129,8 +86,8 @@ echo "   Каталог:      ${ENV_ROOT}"
 echo "   Данные:       ${STATE_DIR}"
 echo "=================================================================="
 
-if ! run_as_runtime_user /bin/test -f "$ENV_FILE"; then
-  echo "❌ [DEPLOY] Не найден файл окружения ${ENV_FILE}. Сначала выполните установку сервера (deploy/install.sh)."
+if ! runtime_op exists-env; then
+  echo 'Environment/broker unavailable: administrator provisioning required; no changes made.'
   exit 10
 fi
 
@@ -144,8 +101,10 @@ PREV_SHA=""
 if [ -L "$CURRENT_LINK" ] && [ -d "$CURRENT_LINK" ]; then
   PREV_RELEASE_DIR="$(readlink -f "$CURRENT_LINK")"
   PREV_SHA="$(basename "$PREV_RELEASE_DIR")"
+  [[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ && "$PREV_RELEASE_DIR" = "$RELEASES_DIR/$PREV_SHA" && ! -L "$PREV_RELEASE_DIR" ]] || { echo 'Unsafe current target; manual intervention required' >&2; exit 10; }
   echo "📌 Текущий активный релиз: ${PREV_SHA} (${PREV_RELEASE_DIR})"
 else
+  [[ ! -e "$CURRENT_LINK" && ! -L "$CURRENT_LINK" ]] || { echo 'Broken current: preserved for administrator recovery' >&2; exit 21; }
   echo "ℹ️ Активный релиз ещё не установлен (первичное развёртывание)."
 fi
 
@@ -155,7 +114,7 @@ fi
 NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
 # Repeating the active SHA never touches its files, metadata, links or dependencies.
 if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ]; then
-  if is_contour_service_active && curl -fsS --max-time 5 "$HEALTH_URL" | EXPECTED_SHA="$TARGET_SHA" node -e '
+  if node "$SCRIPT_DIR/release-integrity.mjs" --verify "$NEW_RELEASE_DIR" && runtime_op policy "$TARGET_SHA" && is_contour_service_active && curl -fsS --max-time 5 "$HEALTH_URL" | EXPECTED_SHA="$TARGET_SHA" node -e '
     let body=""; process.stdin.on("data", c => body += c);
     process.stdin.on("end", () => { try { const d=JSON.parse(body);
       process.exit(d.ok && d.db === "ok" && d.schemaCompatible && d.frontendReady && d.commit === process.env.EXPECTED_SHA ? 0 : 1);
@@ -167,9 +126,9 @@ if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ]; t
   exit 21
 fi
 
-if [ -n "$PREV_RELEASE_DIR" ] && run_as_runtime_user /bin/test -f "${STATE_DIR}/data/media.db"; then
+if [ -n "$PREV_RELEASE_DIR" ]; then
   echo "💾 Шаг 1/6: Создание предрелизной резервной копии БД и загрузок..."
-  run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=pre-deploy
+  runtime_op backup-predeploy "$PREV_SHA"
   BACKUP_RC=$?
   if [ "$BACKUP_RC" -ne 0 ]; then
     echo "❌ [DEPLOY] Предрелизное резервное копирование завершилось с ошибкой (код ${BACKUP_RC})!"
@@ -185,25 +144,26 @@ fi
 # ==============================================================================
 NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
 STAGE_BUILD_DIR="${RELEASES_DIR}/.${TARGET_SHA}.tmp.$$"
+STAGE_CREATED=0
 
 cleanup_tmp() {
   rm -f "${CURRENT_LINK}.next.$$" "${CURRENT_LINK}.recovery.$$" "${PREVIOUS_LINK}.next.$$"
-  if [ -d "$STAGE_BUILD_DIR" ]; then
+  if [ "$STAGE_CREATED" = 1 ] && [ -d "$STAGE_BUILD_DIR" ] && [ ! -L "$STAGE_BUILD_DIR" ] && [[ "$(readlink -f "$STAGE_BUILD_DIR")" = "$RELEASES_DIR/.${TARGET_SHA}.tmp.$$" ]]; then
     rm -rf "$STAGE_BUILD_DIR"
   fi
-  if [ -n "$DIST_ARCHIVE" ] && [ -f "$DIST_ARCHIVE" ]; then
-    rm -f "$DIST_ARCHIVE"
-  fi
+  # The caller owns the uploaded archive. Never delete an arbitrary caller path.
 }
 trap cleanup_tmp EXIT
 
 prepare_isolated_release() {
   # A previously prepared release is immutable too. Never repair it in place.
-  if [ -e "$NEW_RELEASE_DIR" ]; then
-    [ -f "$NEW_RELEASE_DIR/.release-sha" ] &&
+  if [ -e "$NEW_RELEASE_DIR" ] || [ -L "$NEW_RELEASE_DIR" ]; then
+    [ ! -L "$NEW_RELEASE_DIR" ] && [ -d "$NEW_RELEASE_DIR" ] &&
+      [ -f "$NEW_RELEASE_DIR/.release-sha" ] &&
       [ "$(cat "$NEW_RELEASE_DIR/.release-sha")" = "$TARGET_SHA" ] &&
-      [ -f "$NEW_RELEASE_DIR/dist/index.html" ] || return 1
-    return 0
+      [ -f "$NEW_RELEASE_DIR/dist/index.html" ] && [ -d "$NEW_RELEASE_DIR/node_modules" ] || return 1
+    node "$SCRIPT_DIR/release-integrity.mjs" --verify "$NEW_RELEASE_DIR" && runtime_op policy "$TARGET_SHA"
+    return $?
   fi
 
   echo "📥 Шаг 2/6: Получение точного коммита ${TARGET_SHA}..."
@@ -220,8 +180,9 @@ prepare_isolated_release() {
     return 1
   fi
 
-  rm -rf "$STAGE_BUILD_DIR" || return 1
-  mkdir -p "$STAGE_BUILD_DIR" || return 1
+  # Do not delete a pre-existing recovery candidate, even after a previous failure.
+  mkdir "$STAGE_BUILD_DIR" || return 1
+  STAGE_CREATED=1
   git -C "$REPO_CACHE_DIR" archive "$TARGET_SHA" | tar -x -C "$STAGE_BUILD_DIR" || return 1
 
   echo "📦 Шаг 3/6: Установка зависимостей по package-lock.json и подготовка бандла..."
@@ -255,11 +216,12 @@ prepare_isolated_release() {
 }
 EOF
   printf '%s\n' "${TARGET_SHA}" > "${STAGE_BUILD_DIR}/.release-sha"
+  node "$SCRIPT_DIR/release-integrity.mjs" --record "$STAGE_BUILD_DIR" || return 1
   chgrp -R "$RUNTIME_USER" "$STAGE_BUILD_DIR" || return 1
   chmod -R u=rwX,g=rX,o= "$STAGE_BUILD_DIR" || return 1
 
   mv "$STAGE_BUILD_DIR" "$NEW_RELEASE_DIR" || return 1
-  return 0
+  runtime_op policy "$TARGET_SHA"
 }
 
 prepare_isolated_release
@@ -340,11 +302,11 @@ SERVICE_MAY_BE_STOPPED=0
 recover_previous() {
   local intended_code="$1" reason="$2"
   echo "RECOVERY: $reason; checking previous SHA $PREV_SHA (database is not restored)." >&2
-  if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ]; then
+  if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ] || ! node "$SCRIPT_DIR/release-integrity.mjs" --verify "$PREV_RELEASE_DIR"; then
     echo 'EMERGENCY 31: no previous release; manual intervention required.' >&2
     return 31
   fi
-  if ! run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/migrate.js" --verify-rollback; then
+  if ! runtime_op verify-rollback "$PREV_SHA"; then
     stop_contour_service || true
     echo 'EMERGENCY 31: previous schema/database cannot be verified; no data overwritten.' >&2
     return 31
@@ -391,11 +353,11 @@ echo "🗄️ Шаг 4/6: Проверка совместимости и миг�
 SERVICE_MAY_BE_STOPPED=1
 stop_contour_service || fail_after_stop 21 "systemctl stop failed"
 if [ -n "$PREV_RELEASE_DIR" ]; then
-  if ! run_as_runtime_user APP_COMMIT_SHA="$PREV_SHA" /usr/bin/node "${PREV_RELEASE_DIR}/server/backup.js" --with-uploads --reason=cutover; then
+  if ! runtime_op backup-final "$PREV_SHA"; then
     fail_after_stop 20 "final backup failed"
   fi
 fi
-run_as_runtime_user APP_COMMIT_SHA="$TARGET_SHA" /usr/bin/node "${NEW_RELEASE_DIR}/server/migrate.js" --verify
+runtime_op migrate "$TARGET_SHA"
 MIGRATE_RC=$?
 if [ "$MIGRATE_RC" -ne 0 ]; then
   fail_after_stop 21 "SQLite migration failed"
@@ -439,11 +401,12 @@ if [ "$VERIFY_RC" -eq 0 ]; then
   COUNT=0
   for rel_path in "${ALL_RELEASES[@]}"; do
     [ -z "$rel_path" ] && continue
+    [[ "$(basename "$rel_path")" =~ ^[0-9a-f]{40}$ && ! -L "$rel_path" && "$(readlink -f "$rel_path")" = "$rel_path" ]] || continue
     COUNT=$((COUNT + 1))
     if [ "$COUNT" -le "$KEEP_RELEASES" ]; then
       continue
     fi
-    if [ "$rel_path" = "$CURRENT_REAL" ] || [ "$rel_path" = "$PREVIOUS_REAL" ]; then
+    if [ "$rel_path" = "$CURRENT_REAL" ] || [ "$rel_path" = "$PREVIOUS_REAL" ] || [ "$rel_path" = "$PREV_RELEASE_DIR" ]; then
       continue
     fi
     echo "   Удаление старого релиза: $(basename "$rel_path")"

@@ -250,7 +250,7 @@ describe('Production-Ready CI/CD, Migrations, Readiness & Backup/Restore Suite',
 
     // P1 #4 & P1 #6: Идемпотентный деплой и делегирование операций с .env runtime-пользователю
     assert.ok(!remoteDeploy.includes('source "$ENV_FILE"'), 'remote-deploy.sh не должен выполнять source "$ENV_FILE" от имени deploy-пользователя');
-    assert.ok(remoteDeploy.includes('run_as_runtime_user'), 'remote-deploy.sh должен выполнять миграции и бэкапы от имени runtime-пользователя');
+    assert.ok(remoteDeploy.includes('/usr/local/sbin/mediacode-ops'), 'runtime operations must use the admin-owned broker');
     assert.ok(
       remoteDeploy.includes('if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ]'),
       'remote-deploy.sh должен идемпотентно обрабатывать повторный деплой уже активного SHA без удаления рабочего каталога'

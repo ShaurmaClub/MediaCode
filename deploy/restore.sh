@@ -14,6 +14,9 @@
 set -u
 set -o pipefail
 
+# Destructive restore is an administrator operation, not a deploy capability.
+[[ "$EUID" = 0 ]] || { echo 'Administrator-only restore: deploy sudo does not grant data restore.' >&2; exit 10; }
+
 RESTORE_ENV="production"
 BACKUP_SPEC="latest"
 MODE=""
@@ -72,7 +75,7 @@ run_as_runtime() {
       UPLOADS_DIR="$UPLOAD_DIR" \
       "$@"
   else
-    sudo -n -u "$RUNTIME_USER" /usr/bin/env \
+    /usr/sbin/runuser -u "$RUNTIME_USER" -- /usr/bin/env \
       ENV_FILE="$ENV_FILE" \
       DB_PATH="$DB_PATH" \
       BACKUP_DIR="$BACKUP_DIR" \

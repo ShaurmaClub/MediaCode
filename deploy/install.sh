@@ -261,22 +261,13 @@ ensure_contour_users() {
 ensure_contour_users "${PROD_RUNTIME_USER}" "${PROD_DEPLOY_USER}"
 ensure_contour_users "${STAGE_RUNTIME_USER}" "${STAGE_DEPLOY_USER}"
 
-# Строго разделённый sudoers: deploy-prod управляет ТОЛЬКО production, deploy-stage — ТОЛЬКО staging
-SUDOERS_FILE="/etc/sudoers.d/mediacode-deploy"
-cat > "${SUDOERS_FILE}" <<EOF
-Defaults:${PROD_DEPLOY_USER},${STAGE_DEPLOY_USER} !requiretty
-${PROD_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-prod.service, /bin/systemctl stop mediacode-prod.service, /bin/systemctl reload mediacode-prod.service, /bin/systemctl status mediacode-prod.service, /bin/systemctl is-active mediacode-prod.service
-${PROD_DEPLOY_USER} ALL=(${PROD_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
-${STAGE_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-stage.service, /bin/systemctl stop mediacode-stage.service, /bin/systemctl reload mediacode-stage.service, /bin/systemctl status mediacode-stage.service, /bin/systemctl is-active mediacode-stage.service
-${STAGE_DEPLOY_USER} ALL=(${STAGE_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
-EOF
-chmod 440 "${SUDOERS_FILE}"
-visudo -cf "${SUDOERS_FILE}" >/dev/null || {
-  err "Ошибка проверки синтаксиса ${SUDOERS_FILE}"
-  rm -f "${SUDOERS_FILE}"
-  exit 1
-}
-ok "Настроены изолированные sudo-привилегии в ${SUDOERS_FILE}"
+# Do not reinstall the retired broad interpreter policy, even on a clean host.
+# Administrator prepares a frozen root-owned snapshot with built dependencies.
+if [ -n "${MEDIACODE_APPROVED_RUNTIME_SOURCE:-}" ]; then
+  /usr/bin/python3 -I "${SCRIPT_DIR}/install-runtime-ops.py" "$MEDIACODE_APPROVED_RUNTIME_SOURCE" || exit 10
+else
+  warn 'CD broker not installed: administrator must review/install runtime helpers separately. No broad sudo granted.'
+fi
 
 # ------------------------------------------------------------------------------
 # 6. Создание структуры каталогов релизов и постоянных данных
