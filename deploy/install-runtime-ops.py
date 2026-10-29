@@ -78,6 +78,15 @@ def main():
                              capture_output=True, text=True, check=True, timeout=10).stdout.strip()
     if not version.startswith('v22.'):
         raise ValueError('approved Node 22 binary required')
+    integrity_source = source / 'deploy/release-integrity.mjs'
+    broker.trusted(integrity_source)
+    integrity = broker.NODE.with_name('mediacode-release-integrity.mjs')
+    staged_integrity = integrity.with_name('.mediacode-release-integrity.next')
+    if integrity.is_symlink() or staged_integrity.is_symlink():
+        raise ValueError('refusing integrity tool symlink')
+    shutil.copyfile(integrity_source, staged_integrity)
+    staged_integrity.chmod(0o644)
+    os.replace(staged_integrity, integrity)
     with tempfile.TemporaryDirectory(prefix='.install-', dir=broker.LIB) as scratch_name:
         scratch = Path(scratch_name)
         for contour in ('production', 'staging'):

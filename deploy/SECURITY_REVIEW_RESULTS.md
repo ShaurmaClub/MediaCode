@@ -21,6 +21,8 @@
 
 - `deploy/remote-deploy.sh`, `release-integrity.mjs`: read-only reuse, inventory,
   canonical roots, pre-stop policy gate, atomic publish/recovery и bounded cleanup.
+  Integrity CLI установлен в fixed admin-owned path; Actions stdin transport
+  (`bash -s` без исходного filename/repo cwd) проверяется отдельным VM assertion.
 - `deploy/mediacode-ops.py`: fixed operations, SUDO_UID/contour/argc/SHA/path validation,
   root-owned closure, clean environment, сброс UID/GID/groups и umask перед Node.
 - `deploy/install-runtime-ops.py`: проверка trusted source **до Python import**,

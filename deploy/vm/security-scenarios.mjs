@@ -85,6 +85,14 @@ assert.equal(command('systemctl', ['show', 'mediacode-prod', '-p', 'MainPID', '-
 assert.equal(fs.statSync(`${state}/.env`).mode & 0o777, 0o600);
 assert.equal(fs.statSync(`${state}/data/media.db`).mode & 0o777, 0o600);
 assert.equal(fs.readlinkSync('/opt/mediacode/staging/current'), code);
+// Exact transport used in Actions: bash -s, no source filename and no repo cwd.
+const streamed = spawnSync('/usr/sbin/runuser', ['-u', 'deploy-stage', '--', 'bash', '-s'], {
+  input: fs.readFileSync(`${root}/deploy/remote-deploy.sh`, 'utf8'), cwd: '/home/deploy-stage',
+  env: { ...process.env, DEPLOY_ENV: 'staging', TARGET_SHA: sha, PATH: '/usr/local/bin:/usr/bin:/bin' },
+  encoding: 'utf8', timeout: 60000,
+});
+assert.equal(streamed.status, 0, streamed.stderr);
+console.log('PASS actual Actions stdin transport: bash -s from deploy home, active SHA no-op');
 console.log('PASS full synthetic staging deployment through deploy-stage/broker/systemd; production PID unchanged');
 
 // Fresh preparation path too: local synthetic Git origin and lockfile/offline npm,

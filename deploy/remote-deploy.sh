@@ -62,7 +62,8 @@ done
 LOCK_FILE="${ENV_ROOT}/.deploy.lock"
 [[ "$ENV_ROOT" = "/opt/mediacode/$DEPLOY_ENV" && "$STATE_DIR" = "/var/lib/mediacode/$DEPLOY_ENV" ]] || { echo 'Noncanonical deployment roots rejected' >&2; exit 10; }
 [[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]] || exit 10
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Actions sends this script over SSH stdin (bash -s); BASH_SOURCE may be unset.
+INTEGRITY_SCRIPT=/usr/local/libexec/mediacode-release-integrity.mjs
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -114,7 +115,7 @@ fi
 NEW_RELEASE_DIR="${RELEASES_DIR}/${TARGET_SHA}"
 # Repeating the active SHA never touches its files, metadata, links or dependencies.
 if [ -n "$PREV_RELEASE_DIR" ] && [ "$NEW_RELEASE_DIR" = "$PREV_RELEASE_DIR" ]; then
-  if node "$SCRIPT_DIR/release-integrity.mjs" --verify "$NEW_RELEASE_DIR" && runtime_op policy "$TARGET_SHA" && is_contour_service_active && curl -fsS --max-time 5 "$HEALTH_URL" | EXPECTED_SHA="$TARGET_SHA" node -e '
+  if node "$INTEGRITY_SCRIPT" --verify "$NEW_RELEASE_DIR" && runtime_op policy "$TARGET_SHA" && is_contour_service_active && curl -fsS --max-time 5 "$HEALTH_URL" | EXPECTED_SHA="$TARGET_SHA" node -e '
     let body=""; process.stdin.on("data", c => body += c);
     process.stdin.on("end", () => { try { const d=JSON.parse(body);
       process.exit(d.ok && d.db === "ok" && d.schemaCompatible && d.frontendReady && d.commit === process.env.EXPECTED_SHA ? 0 : 1);
@@ -162,7 +163,7 @@ prepare_isolated_release() {
       [ -f "$NEW_RELEASE_DIR/.release-sha" ] &&
       [ "$(cat "$NEW_RELEASE_DIR/.release-sha")" = "$TARGET_SHA" ] &&
       [ -f "$NEW_RELEASE_DIR/dist/index.html" ] && [ -d "$NEW_RELEASE_DIR/node_modules" ] || return 1
-    node "$SCRIPT_DIR/release-integrity.mjs" --verify "$NEW_RELEASE_DIR" && runtime_op policy "$TARGET_SHA"
+    node "$INTEGRITY_SCRIPT" --verify "$NEW_RELEASE_DIR" && runtime_op policy "$TARGET_SHA"
     return $?
   fi
 
@@ -216,7 +217,7 @@ prepare_isolated_release() {
 }
 EOF
   printf '%s\n' "${TARGET_SHA}" > "${STAGE_BUILD_DIR}/.release-sha"
-  node "$SCRIPT_DIR/release-integrity.mjs" --record "$STAGE_BUILD_DIR" || return 1
+  node "$INTEGRITY_SCRIPT" --record "$STAGE_BUILD_DIR" || return 1
   chgrp -R "$RUNTIME_USER" "$STAGE_BUILD_DIR" || return 1
   chmod -R u=rwX,g=rX,o= "$STAGE_BUILD_DIR" || return 1
 
@@ -302,7 +303,7 @@ SERVICE_MAY_BE_STOPPED=0
 recover_previous() {
   local intended_code="$1" reason="$2"
   echo "RECOVERY: $reason; checking previous SHA $PREV_SHA (database is not restored)." >&2
-  if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ] || ! node "$SCRIPT_DIR/release-integrity.mjs" --verify "$PREV_RELEASE_DIR"; then
+  if [ -z "$PREV_RELEASE_DIR" ] || [ ! -d "$PREV_RELEASE_DIR" ] || ! node "$INTEGRITY_SCRIPT" --verify "$PREV_RELEASE_DIR"; then
     echo 'EMERGENCY 31: no previous release; manual intervention required.' >&2
     return 31
   fi
