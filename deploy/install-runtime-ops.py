@@ -18,11 +18,13 @@ def main():
     if os.geteuid() != 0 or len(sys.argv) != 2:
         raise ValueError('administrator and one trusted source directory required')
     source = Path(sys.argv[1])
+    print('Validating frozen helper source', flush=True)
     spec = importlib.util.spec_from_file_location('broker', Path(__file__).with_name('mediacode-ops.py'))
     broker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(broker)
     broker.trusted_tree(source / 'server')
     broker.trusted_tree(source / 'node_modules')
+    print('Frozen helper source validated', flush=True)
     broker.trusted(source / 'package.json')
     broker.trusted(Path(__file__))
     broker.trusted(Path(__file__).with_name('mediacode-ops.py'))
@@ -41,6 +43,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='.install-', dir=broker.LIB) as scratch_name:
         scratch = Path(scratch_name)
         for contour in ('production', 'staging'):
+            print('Installing trusted helper: ' + contour, flush=True)
             target = broker.LIB / contour
             if target.exists() or target.is_symlink():
                 # Updating approved migration code is an explicit admin action, not CD.

@@ -45,7 +45,11 @@ def trusted_tree(path):
                     deny('unsafe helper link')
                 trusted(item.resolve())
             else:
-                trusted(item)
+                info = item.lstat()
+                # Ancestor directory was checked on entry; do not restat /usr/... for
+                # every dependency file (tens of thousands of redundant syscalls).
+                if info.st_uid != 0 or info.st_mode & 0o022:
+                    deny('writable helper member')
 
 
 def no_links(path):

@@ -93,9 +93,11 @@ cp /etc/ssh/sshd_config "$scratch/sshd_config"
 if ! grep -qxF "$ssh_include" "$scratch/sshd_config"; then printf '\nInclude %s/sshd-users\n' "$scratch" >> "$scratch/sshd_config";
 else sed -i "s|^$ssh_include\$|Include $scratch/sshd-users|" "$scratch/sshd_config"; fi
 sshd -t -f "$scratch/sshd_config" || fail 'candidate sshd config invalid'
+echo 'Candidate SSH configuration validated'
 if [[ -f /etc/ssh/mediacode-deploy.conf ]]; then cmp -s /etc/ssh/mediacode-deploy.conf "$scratch/sshd-users" || fail 'existing deploy SSH policy differs; review before overwrite'; fi
 # Install/validate the admin-owned helper and scoped sudo policy after account creation.
 for suffix in prod stage; do
+  echo "Preparing isolated accounts/directories: $suffix"
   runtime="mediacode-$suffix"; deploy="deploy-$suffix"
   id "$runtime" >/dev/null 2>&1 || useradd --system --user-group --shell /usr/sbin/nologin "$runtime"
   id "$deploy" >/dev/null 2>&1 || useradd --create-home --user-group --shell /bin/bash "$deploy"
@@ -113,6 +115,7 @@ for suffix in prod stage; do
   install -d -m 700 -o "$runtime" -g "$runtime" "/var/lib/mediacode/$contour"
   for dir in data uploads uploads/recruitment backups; do install -d -m 750 -o "$runtime" -g "$runtime" "/var/lib/mediacode/$contour/$dir"; done
 done
+echo 'Installing administrator-owned broker and policy'
 /usr/bin/python3 -I "$(dirname "$0")/install-runtime-ops.py" "$runtime_source"
 install -m 600 "$scratch/sshd-users" /etc/ssh/mediacode-deploy.conf
 if ! grep -qxF "$ssh_include" /etc/ssh/sshd_config; then

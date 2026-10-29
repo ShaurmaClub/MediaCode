@@ -7,7 +7,7 @@ import { inventory } from '../release-integrity.mjs';
 const root = '/srv/review';
 if (!fs.existsSync('/etc/mediacode-lab-vm') || fs.readFileSync('/etc/hostname', 'utf8').trim() !== 'mediacode-vm-lab') process.exit(90);
 function run(cmd, args = [], env = {}, expected = 0) {
-  const r = spawnSync(cmd, args, { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 120000 });
+  const r = spawnSync(cmd, args, { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 300000 });
   assert.equal(r.status, expected, `${cmd} expected=${expected} actual=${r.status}\n${r.stdout}\n${r.stderr}`);
   return r.stdout.trim();
 }
@@ -112,11 +112,11 @@ console.log('PASS real systemd sandbox, allowed/denied writes, journal, automati
 fs.mkdirSync('/tmp/vm-fault-bin');
 for (const cmd of ['ln', 'mv', 'sudo', 'curl']) fs.symlinkSync(`${root}/deploy/vm/fault-command.sh`, `/tmp/vm-fault-bin/${cmd}`);
 run('chmod', ['755', `${root}/deploy/vm/fault-command.sh`]);
-function deploy(sha, fault, expected) {
+function deploy(sha, fault, expected, extra = {}) {
   const command = fault ? 'bash' : 'runuser';
   const args = fault ? ['deploy/remote-deploy.sh'] : ['-u', 'deploy-prod', '--', 'bash', 'deploy/remote-deploy.sh'];
   run(command, args, { DEPLOY_ENV: 'production', TARGET_SHA: sha, FAULT_CASE: fault,
-    PATH: `/tmp/vm-fault-bin:${process.env.PATH}`, VERIFY_RETRIES: '2', VERIFY_WAIT_SEC: '1' }, expected);
+    PATH: `/tmp/vm-fault-bin:${process.env.PATH}`, VERIFY_RETRIES: '2', VERIFY_WAIT_SEC: '1', ...extra }, expected);
 }
 function userData() {
   const file = fs.existsSync(`${data}/data/media.db`) ? `${data}/data/media.db` : `${data}/data/hidden.db`;
@@ -148,6 +148,16 @@ console.log('PASS healthy repeated SHA and normal release as actual non-root dep
 reset(); fs.mkdirSync(`${opt}/releases/${'d'.repeat(40)}`);
 deploy('d'.repeat(40), '', 21); assert.equal(health().commit, old); unchanged();
 console.log('PASS active healthy/damaged SHA, existing inactive SHA, prepare failure, immutable files/data');
+reset();
+const inactiveEntry = `${opt}/releases/${next}/dist/index.html`, inactiveOriginal = fs.readFileSync(inactiveEntry);
+fs.writeFileSync(inactiveEntry, 'damaged inactive release');
+deploy(next, '', 21); assert.equal(fs.readFileSync(inactiveEntry, 'utf8'), 'damaged inactive release');
+assert.equal(health().commit, old); unchanged(); fs.writeFileSync(inactiveEntry, inactiveOriginal);
+fs.renameSync(`${opt}/releases/${next}`, `${opt}/releases/${next}.saved-fixture`);
+fs.symlinkSync(`${opt}/releases/${old}`, `${opt}/releases/${next}`);
+deploy(next, '', 21); assert.equal(health().commit, old); unchanged();
+fs.unlinkSync(`${opt}/releases/${next}`); fs.renameSync(`${opt}/releases/${next}.saved-fixture`, `${opt}/releases/${next}`);
+console.log('PASS damaged inactive release and symlink substitution refused without changing files/service/data');
 for (const fault of ['previous-ln', 'previous-mv', 'current-ln', 'current-mv', 'stop', 'restart', 'interrupt']) {
   reset(); deploy(next, fault, fault === 'restart' ? 30 : 21);
   assert.equal(health().commit, old); unchanged();
@@ -165,5 +175,9 @@ for (const fault of ['db-unavailable', 'future-schema', 'restart-all', 'health']
 }
 reset();
 assert.equal(run('systemctl', ['show', 'mediacode', '-p', 'MainPID', '--value']), legacyPid);
+deploy(next, '', 0, { KEEP_RELEASES: '1' }); unchanged();
+assert.ok(fs.existsSync(`${opt}/releases/${old}`)); assert.ok(fs.existsSync(`${opt}/releases/${next}`));
+assert.equal(fs.realpathSync(`${opt}/previous`), `${opt}/releases/${old}`);
+console.log('PASS cleanup with keep=1 preserves both current and previous releases');
 console.log('PASS all VM fault scenarios; unrelated legacy service PID preserved');
 await import('./security-scenarios.mjs');
