@@ -45,6 +45,10 @@ def main():
         shutil.copyfile(node_source, broker.NODE)
         broker.NODE.chmod(0o755)
     broker.trusted(broker.NODE)
+    version = subprocess.run([str(broker.NODE), '--version'], env={'PATH': '/usr/bin:/bin'},
+                             capture_output=True, text=True, check=True, timeout=10).stdout.strip()
+    if not version.startswith('v22.'):
+        raise ValueError('approved Node 22 binary required')
     with tempfile.TemporaryDirectory(prefix='.install-', dir=broker.LIB) as scratch_name:
         scratch = Path(scratch_name)
         for contour in ('production', 'staging'):

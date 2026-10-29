@@ -50,6 +50,8 @@ def trusted_tree(path):
                 # every dependency file (tens of thousands of redundant syscalls).
                 if info.st_uid != 0 or info.st_mode & 0o022:
                     deny('writable helper member')
+                if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                    deny('special helper member')
 
 
 def no_links(path):

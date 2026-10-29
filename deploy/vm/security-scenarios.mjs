@@ -10,9 +10,10 @@ assert.equal(fs.readFileSync('/etc/hostname', 'utf8').trim(), 'mediacode-vm-lab'
 const broker = '/usr/local/sbin/mediacode-ops';
 let negativeCount = 0;
 function command(cmd, args, expected = 0, env = {}) {
-  const result = spawnSync(cmd, args, { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 180000 });
+  const result = spawnSync(cmd === 'runuser' ? '/usr/sbin/runuser' : cmd, args,
+    { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 180000 });
   // Do not include args/env/output: some SSH tests carry synthetic private keys in env.
-  assert.equal(result.status, expected, `${cmd} status=${result.status}; expected=${expected}`);
+  assert.equal(result.status, expected, `${cmd} status=${result.status}; error=${result.error?.code}; expected=${expected}\n${result.stderr.slice(-1500)}`);
   return result.stdout.trim();
 }
 function rejected(user, args) {
@@ -85,3 +86,29 @@ assert.equal(fs.statSync(`${state}/.env`).mode & 0o777, 0o600);
 assert.equal(fs.statSync(`${state}/data/media.db`).mode & 0o777, 0o600);
 assert.equal(fs.readlinkSync('/opt/mediacode/staging/current'), code);
 console.log('PASS full synthetic staging deployment through deploy-stage/broker/systemd; production PID unchanged');
+
+// Fresh preparation path too: local synthetic Git origin and lockfile/offline npm,
+// actual artifact extraction, dependencies/native build, inventory and atomic publish.
+const fixture = '/srv/stage-fixture'; fs.mkdirSync(fixture);
+command('bash', ['-c', 'tar --exclude=.git --exclude=node_modules --exclude=.npm-cache --exclude=data --exclude=uploads -cf - . | tar -xf - -C "$1"', 'copy', fixture]);
+command('chown', ['-R', 'deploy-stage:deploy-stage', fixture]);
+const git = (...args) => command('runuser', ['-u', 'deploy-stage', '--', 'git', '-C', fixture, ...args]);
+git('init', '-q'); git('config', 'user.name', 'Synthetic VM fixture'); git('config', 'user.email', 'lab@example.invalid');
+git('add', '.'); git('commit', '-qm', 'Synthetic reviewed source');
+const fresh = git('rev-parse', 'HEAD');
+assert.equal(fs.existsSync(`/opt/mediacode/staging/releases/${fresh}`), false);
+command('cp', ['-a', `${root}/.npm-cache`, '/home/deploy-stage/.npm-cache']);
+command('chown', ['-R', 'deploy-stage:deploy-stage', '/home/deploy-stage/.npm-cache']);
+command('tar', ['-czf', '/tmp/stage-dist.tar.gz', '-C', `${root}/dist`, '.']);
+command('chmod', ['644', '/tmp/stage-dist.tar.gz']);
+command('runuser', ['-u', 'deploy-stage', '--', 'bash', 'deploy/remote-deploy.sh'], 0, {
+  DEPLOY_ENV: 'staging', TARGET_SHA: fresh, REPO_URL: `file://${fixture}`, DIST_ARCHIVE: '/tmp/stage-dist.tar.gz',
+  PATH: '/usr/local/bin:/usr/bin:/bin', VERIFY_RETRIES: '8', VERIFY_WAIT_SEC: '1',
+  npm_config_cache: '/home/deploy-stage/.npm-cache', npm_config_offline: 'true', npm_config_build_from_source: 'true',
+  npm_config_nodedir: process.env.MEDIACODE_TEST_NODE_DIR || '/usr/local',
+});
+assert.equal(JSON.parse(command('curl', ['-fsS', 'http://127.0.0.1:4001/api/health/ready'])).commit, fresh);
+assert.equal(fs.realpathSync('/opt/mediacode/staging/previous'), code);
+assert.ok(fs.existsSync(`/opt/mediacode/staging/releases/${fresh}/.release-inventory.json`));
+assert.equal(command('systemctl', ['show', 'mediacode-prod', '-p', 'MainPID', '--value']), productionPid);
+console.log('PASS fresh synthetic staging: local Git, offline lockfile/native install, CI dist artifact, inventory, backup, atomic switch, readiness');

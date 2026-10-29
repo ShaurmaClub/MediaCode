@@ -372,6 +372,7 @@ bootstrap_initial_release() {
     ok "Контур ${env_name} уже имеет активный релиз: $(readlink -f "${current_link}")"
     return 0
   fi
+  [[ ! -e "${current_link}" && ! -L "${current_link}" ]] || { err 'Damaged current is preserved for administrator recovery'; return 1; }
 
   local init_sha="initial-$(date -u +%Y%m%d%H%M%S)"
   if [[ -d "${SOURCE_REPO_DIR}/.git" ]]; then
@@ -380,7 +381,7 @@ bootstrap_initial_release() {
   local release_dir="${env_root}/releases/${init_sha}"
 
   log "Подготовка первоначального релиза ${env_name} (${init_sha})..."
-  mkdir -p "${release_dir}"
+  mkdir "${release_dir}" || { err 'Existing release preserved; clean installer will not overwrite it'; return 1; }
 
   if [[ -f "${SOURCE_REPO_DIR}/package.json" && -f "${SOURCE_REPO_DIR}/server/index.js" ]]; then
     rsync -a \
@@ -426,7 +427,7 @@ EOF
   chmod -R u=rwX,g=rX,o= "${release_dir}"
 
   # Проверка и применение миграций БД от имени изолированного runtime-пользователя
-  sudo -n -u "${runtime_user}" /usr/bin/env \
+  /usr/sbin/runuser -u "${runtime_user}" -- /usr/bin/env \
     NODE_ENV=production \
     ENV_FILE="${BASE_VAR_DIR}/${env_name}/.env" \
     DB_PATH="${BASE_VAR_DIR}/${env_name}/data/media.db" \
@@ -435,6 +436,8 @@ EOF
       return 1
     }
 
+  node "${SCRIPT_DIR}/release-integrity.mjs" --record "${release_dir}" || return 1
+  chown "${deploy_user}:${runtime_user}" "${release_dir}/.release-inventory.json"
   ln -sfn "${release_dir}" "${current_link}"
   chown -h "${deploy_user}:${runtime_user}" "${current_link}"
   ok "Первоначальный релиз ${env_name} установлен: ${release_dir}"

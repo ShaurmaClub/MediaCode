@@ -159,8 +159,9 @@ jobs:
           sudo install -o root -g root -m 755 "$(command -v node)" /usr/local/libexec/mediacode-node
           tar --exclude=.git --exclude=.npm-cache --exclude=data --exclude=uploads -cf - . | sudo tar -xf - -C /srv/review
           sudo chown -R root:root /srv/review
+          sudo cp -a .npm-cache /srv/review/.npm-cache
       - name: Real sudoers, systemd, full synthetic staging and fault injection
-        run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted bash /srv/review/deploy/vm/prepare-ci.sh
+        run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted MEDIACODE_TEST_NODE_DIR="$(dirname "$(dirname "$(command -v node)")")" bash /srv/review/deploy/vm/prepare-ci.sh
 
   notify-ci-failure:
     name: "🚨 Alert on CI Failure"
