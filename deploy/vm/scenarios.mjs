@@ -74,12 +74,18 @@ fs.writeFileSync('/var/lib/mediacode/staging/.env', 'LAB_ONLY=synthetic\n', { mo
 run('chown', ['mediacode-stage:mediacode-stage', '/var/lib/mediacode/staging/.env']);
 run('chown', ['mediacode-prod:mediacode-prod', envFile]); fs.chmodSync(envFile, 0o600);
 run('runuser', ['-u', 'mediacode-prod', '--', 'env', `ENV_FILE=${envFile}`, `DB_PATH=${data}/data/media.db`, '/usr/bin/node', `${opt}/releases/${old}/server/migrate.js`, '--verify']);
-const db = new Database(`${data}/data/media.db`); db.exec('CREATE TABLE lab_preserve(n INTEGER); INSERT INTO lab_preserve VALUES (1)'); db.close();
+const db = new Database(`${data}/data/media.db`); db.exec('CREATE TABLE lab_preserve(n INTEGER); INSERT INTO lab_preserve VALUES (1)');
+const user = db.prepare("INSERT INTO users(login,password_hash,role,bio) VALUES ('vm-synthetic-user','not-a-real-password','STUDENT','synthetic profile')").run().lastInsertRowid;
+const task = db.prepare("INSERT INTO tasks(title,creator_id,points) VALUES ('Synthetic preservation task',?,7)").run(user).lastInsertRowid;
+db.prepare("INSERT INTO applications(task_id,user_id,comment) VALUES (?,?,'synthetic application')").run(task, user);
+db.prepare("INSERT INTO points(user_id,amount,reason,task_id) VALUES (?,7,'synthetic ledger',?)").run(user, task);
+db.close();
 run('chown', ['mediacode-prod:mediacode-prod', `${data}/data/media.db`]);
 const baseline = '/root/mediacode-lab-baseline.db';
 fs.chmodSync(`${data}/data/media.db`, 0o600);
 fs.writeFileSync(`${data}/uploads/recruitment/synthetic.txt`, 'synthetic upload; must survive every deployment\n');
 run('chown', ['mediacode-prod:mediacode-prod', `${data}/uploads/recruitment/synthetic.txt`]);
+fs.chmodSync(`${data}/uploads/recruitment/synthetic.txt`, 0o600);
 fs.copyFileSync(`${data}/data/media.db`, baseline);
 for (const unit of ['mediacode-prod', 'mediacode-stage']) fs.copyFileSync(`${root}/deploy/${unit}.service`, `/etc/systemd/system/${unit}.service`);
 run('systemctl', ['daemon-reload']);
@@ -121,9 +127,17 @@ function deploy(sha, fault, expected, extra = {}) {
 function userData() {
   const file = fs.existsSync(`${data}/data/media.db`) ? `${data}/data/media.db` : `${data}/data/hidden.db`;
   const db = new Database(file, { readonly: true });
-  const snapshot = JSON.stringify(db.prepare('SELECT n FROM lab_preserve ORDER BY n').all()); db.close();
+  assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
+  const snapshot = JSON.stringify(db.prepare('SELECT n FROM lab_preserve ORDER BY n').all());
+  const business = crypto.createHash('sha256').update(JSON.stringify([
+    db.prepare('SELECT id,login,role,bio FROM users ORDER BY id').all(),
+    db.prepare('SELECT id,title,creator_id,points,status FROM tasks ORDER BY id').all(),
+    db.prepare('SELECT id,task_id,user_id,status,comment FROM applications ORDER BY id').all(),
+    db.prepare('SELECT id,user_id,amount,reason,task_id,is_reversed FROM points ORDER BY id').all(),
+  ])).digest('hex'); db.close();
+  for (const privateFile of [file, envFile, `${data}/uploads/recruitment/synthetic.txt`]) assert.equal(fs.statSync(privateFile).mode & 0o777, 0o600);
   const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  return { snapshot, env: hash(envFile), upload: hash(`${data}/uploads/recruitment/synthetic.txt`) };
+  return { snapshot, business, env: hash(envFile), upload: hash(`${data}/uploads/recruitment/synthetic.txt`) };
 }
 const expectedData = userData();
 function unchanged() { assert.deepEqual(userData(), expectedData); }
@@ -169,9 +183,13 @@ reset(); deploy(bad, 'readiness', 30); assert.equal(health().commit, old);
 const preserved = new Database(`${data}/data/media.db`, { readonly: true });
 assert.equal(preserved.prepare('SELECT COUNT(*) AS n FROM lab_preserve WHERE n=999').get().n, 1); preserved.close();
 assert.equal(userData().env, expectedData.env); assert.equal(userData().upload, expectedData.upload);
+assert.equal(userData().business, expectedData.business);
 console.log('PASS readiness rollback keeps writes made after final backup (no DB restore)');
 for (const fault of ['db-unavailable', 'future-schema', 'restart-all', 'health']) {
-  reset(); deploy(next, fault, 31); unchanged(); console.log(`PASS ${fault}: explicit emergency 31, no destructive restore`);
+  reset(); deploy(next, fault, 31); unchanged();
+  if (fault === 'health') assert.equal(health().commit, old);
+  else run('/bin/systemctl', ['is-active', 'mediacode-prod'], {}, 3);
+  console.log(`PASS ${fault}: explicit emergency 31, no destructive restore`);
 }
 reset();
 assert.equal(run('systemctl', ['show', 'mediacode', '-p', 'MainPID', '--value']), legacyPid);

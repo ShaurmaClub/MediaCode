@@ -1,5 +1,9 @@
 # Vavilon CI/CD: проверка инфраструктуры 29.10.2026
 
+Это исторический отчёт до замены broad runtime sudo. Актуальный security review
+и новая Ubuntu/systemd VM: [SECURITY_REVIEW_RESULTS.md](SECURITY_REVIEW_RESULTS.md).
+Старые sudo/privilege результаты ниже не означают проверку новой модели.
+
 ## Статус и границы
 
 Подготовка кода для PR #5 → `ci/cd-ubuntu24`. Merge #5/#4, provisioning рабочего

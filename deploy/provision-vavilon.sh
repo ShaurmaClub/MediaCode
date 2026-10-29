@@ -9,7 +9,7 @@ while (($#)); do
     --prod-key) prod_key="${2:?}"; shift 2;;
     --stage-key) stage_key="${2:?}"; shift 2;;
     --runtime-source) runtime_source="${2:?}"; shift 2;;
-    --help) echo 'provision-vavilon.sh --check|--apply --legacy-dir /srv/services/MediaCode [--prod-key prod.pub --stage-key stage.pub]'; exit 0;;
+    --help) echo 'provision-vavilon.sh --check|--apply --legacy-dir /srv/services/MediaCode [--prod-key prod.pub --stage-key stage.pub --runtime-source /secure/frozen-source]'; exit 0;;
     *) echo 'Unknown/incomplete provisioning option' >&2; exit 10;;
   esac
 done
