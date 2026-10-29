@@ -78,6 +78,8 @@ trap 'rm -rf "$scratch"' EXIT
 cat > "$scratch/sshd-users" <<'EOF'
 Match User deploy-prod,deploy-stage
     AuthenticationMethods publickey
+    AuthorizedKeysFile /etc/ssh/mediacode-keys/%u
+    PermitUserRC no
     PubkeyAuthentication yes
     PubkeyAcceptedAlgorithms ssh-ed25519
     PasswordAuthentication no
@@ -102,14 +104,15 @@ for suffix in prod stage; do
   id "$runtime" >/dev/null 2>&1 || useradd --system --user-group --shell /usr/sbin/nologin "$runtime"
   id "$deploy" >/dev/null 2>&1 || useradd --create-home --user-group --shell /bin/bash "$deploy"
   usermod -a -G "$runtime" "$deploy"
-  [[ ! -L "/home/$deploy/.ssh" && ! -L "/home/$deploy/.ssh/authorized_keys" ]] || fail 'symlink in deploy key path; review manually'
-  install -d -m 700 -o "$deploy" -g "$deploy" "/home/$deploy/.ssh"
-  key="$prod_key"; other_key="$stage_key"; [[ "$suffix" != stage ]] || { key="$stage_key"; other_key="$prod_key"; }
-  auth="/home/$deploy/.ssh/authorized_keys"
-  [[ ! -f "$auth" ]] || ! grep -qF "$(awk '{print $2}' "$other_key")" "$auth" || fail 'other Environment key already authorized; remove separately'
-  touch "$auth"
-  if ! grep -qF "$(awk '{print $2}' "$key")" "$auth"; then printf 'restrict %s\n' "$(cat "$key")" >> "$auth"; fi
-  chown "$deploy:$deploy" "$auth"; chmod 600 "$auth"
+  # Deploy-owned ~/.ssh cannot authorize a shared Environment key anymore.
+  [[ ! -L /etc/ssh/mediacode-keys ]] || fail 'symlink in administrator key directory'
+  install -d -m 755 -o root -g root /etc/ssh/mediacode-keys
+  key="$prod_key"; [[ "$suffix" != stage ]] || key="$stage_key"
+  auth="/etc/ssh/mediacode-keys/$deploy"
+  [[ ! -L "$auth" ]] || fail 'symlink in administrator key path'
+  printf 'restrict %s\n' "$(cat "$key")" > "$scratch/key-$suffix"
+  [[ ! -e "$auth" ]] || cmp -s "$auth" "$scratch/key-$suffix" || fail 'installed deploy key differs; explicit administrator key rotation required'
+  install -m 644 -o root -g root "$scratch/key-$suffix" "$auth"
   contour=production; [[ "$suffix" != stage ]] || contour=staging
   install -d -m 750 -o "$deploy" -g "$runtime" "/opt/mediacode/$contour" "/opt/mediacode/$contour/releases" "/opt/mediacode/$contour/repo"
   install -d -m 700 -o "$runtime" -g "$runtime" "/var/lib/mediacode/$contour"

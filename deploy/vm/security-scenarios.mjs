@@ -40,7 +40,8 @@ for (const [suffix, contour, other] of [['prod', 'production', 'staging'], ['sta
   rejected(user, ['ln', '-sf', '/bin/sh', broker]);
   for (const file of ['/etc/sudoers.d/mediacode-deploy', '/etc/ssh/sshd_config',
     '/etc/ssh/mediacode-deploy.conf', '/etc/systemd/system/mediacode-prod.service',
-    '/etc/systemd/system/mediacode-stage.service', `/usr/local/lib/mediacode-ops/${contour}/server/migrate.js`]) {
+    '/etc/systemd/system/mediacode-stage.service', `/usr/local/lib/mediacode-ops/${contour}/server/migrate.js`,
+    `/etc/ssh/mediacode-keys/${user}`]) {
     rejected(user, ['/usr/bin/test', '-w', file]);
   }
   command('ln', ['-s', broker, `/home/${user}/broker-link`]);

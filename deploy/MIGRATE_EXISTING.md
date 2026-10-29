@@ -1,5 +1,10 @@
 # Миграция существующего MediaCode
 
+Security review: [SECURITY_MODEL.md](SECURITY_MODEL.md) описывает новый admin-owned
+broker, approved migration gate, повтор SHA и повреждённые релизы. Broad sudo
+env/node/test больше не используется. Любое применение на Vavilon запрещено до
+отдельного согласования. Destructive `restore.sh` доступен только администратору.
+
 Это не чистая установка. Начинать с `LEGACY_AUDIT.md`. На Vavilon запрещено выполнять `install.sh`: там Ubuntu 22.04, Caddy и действующий `mediacode.service`. Ни ОС, ни proxy, ни firewall скрипт подготовки не меняет.
 
 Решение 29.10: **оставляем Ubuntu 22.04 и Caddy**. Provisioning только после отдельного разрешения, через `provision-vavilon.sh`; правила доступа и Tailscale OIDC — в `VAVILON_OIDC.md`.

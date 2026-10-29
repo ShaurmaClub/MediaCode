@@ -1,5 +1,12 @@
 # Vavilon: действия администратора в Tailscale и GitHub
 
+Обновление security review PR #5: [SECURITY_MODEL.md](SECURITY_MODEL.md).
+Deploy sudo теперь только через root-owned broker с fixed operations и trusted
+helper closure; root-owned SSH keys — `/etc/ssh/mediacode-keys/{deploy-prod,deploy-stage}`.
+`--apply` требует `--runtime-source` (frozen reviewed root-owned snapshot с готовыми
+dependencies). При изменении migration-кода нужен отдельный admin helper review,
+не выдавать CD права обновлять его. Ничего на Vavilon сейчас не применять.
+
 Архитектура первой миграции согласована: **Ubuntu 22.04 + Node 22 + systemd + SQLite + действующий Caddy**. OpenSSH остаётся обычным SSH с отдельными Ed25519-ключами. Публичный SSH, Tailscale SSH, upgrade ОС и замена proxy не нужны.
 
 Реализация основана на официальных документах:
@@ -86,6 +93,7 @@ Root check даёт более полную проверку ACL/групп/sudo
 ```bash
 sudo bash deploy/provision-vavilon.sh --apply \
   --legacy-dir /srv/services/MediaCode \
+  --runtime-source /secure/frozen-reviewed-snapshot \
   --prod-key /secure/path/prod.pub --stage-key /secure/path/stage.pub
 ```
 

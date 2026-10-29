@@ -10,6 +10,9 @@
 
 - Старые provisioning и clean installer давали deploy универсальные sudo env/node/test
   от имени runtime. Они удалены в обоих путях установки.
+- Deploy-owned authorized_keys позволял самостоятельно менять список допущенных
+  ключей. Scoped policy теперь читает ровно один admin-approved ключ каждого
+  аккаунта из root-owned `/etc/ssh/mediacode-keys/%u`; домашний authorized_keys не используется.
 - В текущем HEAD исходного PR (`b1ea8c3`) пути `rsync --delete` уже не было: повтор
   здорового активного SHA являлся no-op. Однако существующий неактивный релиз проверялся
   только по marker/index, без проверки остальных файлов. Это усилено inventory.

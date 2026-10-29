@@ -1,5 +1,11 @@
 # Архитектура CI/CD и инфраструктуры MediaCode (ARCHITECTURE.md)
 
+Security model supersedes older runtime-sudo descriptions below:
+[SECURITY_MODEL.md](SECURITY_MODEL.md). Deploy has only fixed broker operations;
+no interpreter or direct systemctl sudo. Migration/backup code and dependencies are
+admin-owned outside releases. Deploy controls its own application runtime, not the
+other contour; this is explicitly not full isolation from its own runtime secrets.
+
 В проекте принят единый, детерминированный production-стек без промежуточных контейнеров и неоднозначных режимов (`DEPLOY_MODE=auto` и PM2 исключены из production-контура):
 
 - **ОС первой миграции Vavilon:** Ubuntu Server 22.04 LTS (24.04 остаётся вариантом будущей отдельной миграции)

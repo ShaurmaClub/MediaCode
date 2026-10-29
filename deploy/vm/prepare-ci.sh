@@ -7,6 +7,7 @@ source /etc/os-release
 [[ "$ID" = ubuntu && "$VERSION_ID" = 22.04 ]] || exit 90
 hostnamectl set-hostname mediacode-vm-lab
 touch /etc/mediacode-lab-vm
+ln -sf /usr/local/libexec/mediacode-node /usr/bin/node
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 openssh-server sudo
 systemctl start ssh

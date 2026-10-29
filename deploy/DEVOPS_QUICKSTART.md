@@ -1,5 +1,9 @@
 # MediaCode: пошаговая инструкция администратора
 
+Security hardening PR #5: актуальная модель sudo, admin-owned helpers/SSH keys,
+immutable inventory и откат provisioning — [SECURITY_MODEL.md](SECURITY_MODEL.md).
+Ничего не применять на Vavilon в рамках этого review.
+
 Обновление 29.10: для первой миграции утверждены Ubuntu 22.04 и Caddy. Актуальная настройка Tailscale OIDC, Environments, immutable subject и порядок PR описаны в [VAVILON_OIDC.md](VAVILON_OIDC.md). Раздел лаборатории ниже описывает прежний контейнер; настоящий systemd проверяется сценарием `deploy/vm/`.
 
 Сейчас production не переносить и CD не включать. Начать с аудита и review. Отдельные разрешения нужны для правок systemd/proxy/SSH/firewall, переключения сайта и включения production CD.
@@ -35,7 +39,11 @@ ssh-keygen -t ed25519 -N '' -f ~/.ssh/mediacode-deploy/prod
 ssh-keygen -t ed25519 -N '' -f ~/.ssh/mediacode-deploy/stage
 ```
 
-После одобренного создания серверных пользователей установить только `.pub` в соответствующие `authorized_keys`. Папка `.ssh` 0700, файл 0600, владелец deploy-prod/deploy-stage. Приватные ключи никогда не копировать на сервер. Не применять SSH/UFW изменения без разрешения.
+После одобренного provisioning только `.pub` устанавливаются в root-owned
+`/etc/ssh/mediacode-keys/deploy-prod` и `deploy-stage` (0644, parent 0755).
+Scoped SSH policy игнорирует deploy-owned `~/.ssh/authorized_keys`; пользователь не
+может сам добавить общий ключ. Приватные ключи не копировать на сервер. SSH/UFW
+изменения без разрешения не применять.
 
 Через физическую консоль/уже доверенное админ-подключение получить:
 

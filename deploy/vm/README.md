@@ -1,5 +1,15 @@
 # Настоящая Ubuntu 22.04 + systemd VM
 
+Для текущего security review основной воспроизводимый прогон — job `systemd-security`
+в `.github/workflows/ci.yml` на **GitHub-hosted ubuntu-22.04 VM**, PID1=systemd.
+Это не container/shim и не подключение к Vavilon. `prepare-ci.sh` отказывается от
+self-hosted runner/неверной ОС/PID1. Source+dependencies замораживаются root-owned,
+тестируются реальные broker/sudoers/SSH/systemd и synthetic staging deployment.
+Никаких Environment secrets, OIDC или Tailscale этому job не выдано.
+
+Прежний QEMU/KVM сценарий ниже тоже доступен для отдельного разрешённого тестового
+хоста. На Vavilon в рамках нынешнего review ничего запускать/применять не нужно.
+
 Этот сценарий разрешён **только для новой одноразовой VM**. Он создаёт пользователей,
 sshd/sudoers, синтетические БД, units и намеренно ломает тестовый сервис. На рабочем
 Vavilon запускать `prepare-guest.sh`/`scenarios.mjs` нельзя. Production-файлы и токены

@@ -1,5 +1,11 @@
 # Лаборатория и статус подготовки
 
+Security hardening повторно проверяется в новом CI job `systemd-security`
+на настоящей одноразовой Ubuntu 22.04 VM GitHub-hosted, без Vavilon connection,
+Environment secrets или OIDC. Старые результаты ниже относятся к прежней модели
+sudo; текущие результаты/ограничения перечисляются отдельно в SECURITY_MODEL.md
+и отчёте security review. До зелёного VM job новая модель не считается проверенной.
+
 Дополнение 29.10.2026: настоящая Ubuntu 22.04 + systemd/KVM и fault-injection
 проверены отдельно: [VAVILON_INFRA_RESULTS.md](VAVILON_INFRA_RESULTS.md).
 Ниже — прежний контейнерный прогон; его shim не доказывает systemd sandbox.
