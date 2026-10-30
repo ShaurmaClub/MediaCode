@@ -10,6 +10,13 @@ touch /etc/mediacode-lab-vm
 ln -sf /usr/local/libexec/mediacode-node /usr/bin/node
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 openssh-server sudo acl
+# GitHub's image ships the runner's sudo file readable as 0644. Keep its rules
+# unchanged, but make this disposable fixture meet visudo's required 0440 mode.
+if [[ -e /etc/sudoers.d/runner ]]; then
+  [[ -f /etc/sudoers.d/runner && ! -L /etc/sudoers.d/runner && "$(stat -c '%u' /etc/sudoers.d/runner)" = 0 ]] || exit 90
+  chmod 0440 /etc/sudoers.d/runner
+fi
+visudo -c >/dev/null
 systemctl start ssh
 cd /srv/review
 echo "Real VM: Ubuntu $VERSION_ID; $(systemctl --version | head -n 1); PID1=$(cat /proc/1/comm)"
