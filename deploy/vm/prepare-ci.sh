@@ -22,6 +22,8 @@ visudo -c >/dev/null
 install -d -m 755 -o root -g root /opt/mediacode /var/lib/mediacode
 setfacl -b -k -- /opt/mediacode /var/lib/mediacode
 setfacl -R -b -k -- /srv/review
+chmod 0755 /opt/mediacode /var/lib/mediacode
+chmod -R u=rwX,go=rX /srv/review
 systemctl start ssh
 cd /srv/review
 echo "Real VM: Ubuntu $VERSION_ID; $(systemctl --version | head -n 1); PID1=$(cat /proc/1/comm)"
