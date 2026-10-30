@@ -33,10 +33,12 @@ if ! echo "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
 fi
 
 if [ "$DEPLOY_ENV" = "production" ]; then
+  CODE_GROUP=mediacode-code-prod
   SERVICE_NAME="${SERVICE_NAME:-mediacode-prod}"
   RUNTIME_USER="${RUNTIME_USER:-mediacode-prod}"
   APP_PORT="${APP_PORT:-4000}"
 else
+  CODE_GROUP=mediacode-code-stage
   SERVICE_NAME="${SERVICE_NAME:-mediacode-stage}"
   RUNTIME_USER="${RUNTIME_USER:-mediacode-stage}"
   APP_PORT="${APP_PORT:-4001}"
@@ -218,7 +220,7 @@ prepare_isolated_release() {
 EOF
   printf '%s\n' "${TARGET_SHA}" > "${STAGE_BUILD_DIR}/.release-sha"
   node "$INTEGRITY_SCRIPT" --record "$STAGE_BUILD_DIR" || return 1
-  chgrp -R "$RUNTIME_USER" "$STAGE_BUILD_DIR" || return 1
+  chgrp -R "$CODE_GROUP" "$STAGE_BUILD_DIR" || return 1
   chmod -R u=rwX,g=rX,o= "$STAGE_BUILD_DIR" || return 1
 
   mv "$STAGE_BUILD_DIR" "$NEW_RELEASE_DIR" || return 1

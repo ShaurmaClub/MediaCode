@@ -17,6 +17,7 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/unix-access.sh"
 
 NON_INTERACTIVE=0
 SKIP_CERTBOT=0
@@ -185,6 +186,7 @@ log "Обновление индексов APT и установка базов�
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y || { err "Ошибка apt-get update"; exit 1; }
 apt-get install -y \
+  acl \
   ca-certificates \
   curl \
   gnupg \
@@ -244,12 +246,12 @@ ensure_contour_users() {
   fi
 
   if ! id -u "${deploy_user}" >/dev/null 2>&1; then
-    useradd --create-home --home-dir "/home/${deploy_user}" --shell /bin/bash -G "${runtime_user}" "${deploy_user}"
+    useradd --create-home --home-dir "/home/${deploy_user}" --shell /bin/bash "${deploy_user}"
     ok "Создан deploy-пользователь ${deploy_user}"
   else
-    usermod -a -G "${runtime_user}" "${deploy_user}" || true
     ok "Deploy-пользователь ${deploy_user} уже существует"
   fi
+  prepare_code_membership "$runtime_user" "$deploy_user" || exit 10
 
   mkdir -p "/home/${deploy_user}/.ssh"
   touch "/home/${deploy_user}/.ssh/authorized_keys"
@@ -277,14 +279,13 @@ setup_contour_dirs() {
   local runtime_user="$2"
   local deploy_user="$3"
 
-  mkdir -p "${BASE_OPT_DIR}/${env_name}/releases"
-  mkdir -p "${BASE_OPT_DIR}/${env_name}/repo"
+  for dir in "${BASE_OPT_DIR}/${env_name}" "${BASE_OPT_DIR}/${env_name}/releases" "${BASE_OPT_DIR}/${env_name}/repo"; do prepare_code_directory "$dir" "$deploy_user" "$runtime_user" || return 10; done
+  audit_private_acl "${BASE_VAR_DIR}/${env_name}" || return 10
   mkdir -p "${BASE_VAR_DIR}/${env_name}/data"
   mkdir -p "${BASE_VAR_DIR}/${env_name}/uploads/recruitment"
   mkdir -p "${BASE_VAR_DIR}/${env_name}/backups"
 
-  # Код принадлежит deploy-<env>:mediacode-<env> (runtime имеет только чтение, другой контур не имеет доступа)
-  chown -R "${deploy_user}:${runtime_user}" "${BASE_OPT_DIR}/${env_name}"
+  # New code uses a dedicated code-only group; preserve legacy parent groups for live runtimes.
   chmod 750 "${BASE_OPT_DIR}/${env_name}"
   chmod 750 "${BASE_OPT_DIR}/${env_name}/releases"
 
@@ -410,7 +411,7 @@ bootstrap_initial_release() {
 }
 EOF
   printf '%s\n' "${init_sha}" > "${release_dir}/.release-sha"
-  chown -R "${deploy_user}:${runtime_user}" "${release_dir}"
+  chown -R "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${release_dir}"
 
   log "Установка зависимостей и сборка frontend для ${env_name}..."
   su - "${deploy_user}" -c "cd '${release_dir}' && npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev" || {
@@ -423,7 +424,7 @@ EOF
   ln -sfn "${BASE_VAR_DIR}/${env_name}/data" "${release_dir}/data"
   ln -sfn "${BASE_VAR_DIR}/${env_name}/uploads" "${release_dir}/uploads"
 
-  chown -R "${deploy_user}:${runtime_user}" "${release_dir}"
+  chown -R "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${release_dir}"
   chmod -R u=rwX,g=rX,o= "${release_dir}"
 
   # Проверка и применение миграций БД от имени изолированного runtime-пользователя
@@ -437,9 +438,9 @@ EOF
     }
 
   node "${SCRIPT_DIR}/release-integrity.mjs" --record "${release_dir}" || return 1
-  chown "${deploy_user}:${runtime_user}" "${release_dir}/.release-inventory.json"
+  chown "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${release_dir}/.release-inventory.json"
   ln -sfn "${release_dir}" "${current_link}"
-  chown -h "${deploy_user}:${runtime_user}" "${current_link}"
+  chown -h "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${current_link}"
   ok "Первоначальный релиз ${env_name} установлен: ${release_dir}"
 }
 

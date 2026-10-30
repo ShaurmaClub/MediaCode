@@ -7,7 +7,15 @@ const inventoryName = '.release-inventory.json';
 export function inventory(root) {
   root = path.resolve(root);
   if (fs.lstatSync(root).isSymbolicLink()) throw new Error('Release cannot be a link');
+  const contour = path.basename(path.dirname(path.dirname(root)));
+  if (!['production', 'staging'].includes(contour)) throw new Error('Unknown release Environment');
   const entries = [];
+  for (const name of ['data', 'uploads']) {
+    const full = path.join(root, name), expected = `/var/lib/mediacode/${contour}/${name}`;
+    // Read only the link itself. Target may be private/inaccessible to deploy.
+    if (!fs.lstatSync(full).isSymbolicLink() || fs.readlinkSync(full) !== expected) throw new Error('Invalid external data link');
+    entries.push([name, 'external-link', expected]);
+  }
   function walk(dir, relative = '') {
     for (const name of fs.readdirSync(dir).sort()) {
       const rel = relative ? `${relative}/${name}` : name;

@@ -28,8 +28,11 @@ run('bash', [...provision, '--check']);
 run('bash', ['deploy/provision-vavilon.sh', '--check', '--legacy-dir', legacy, '--prod-key', '/tmp/vm-keys/prod.pub', '--stage-key', '/tmp/vm-keys/prod.pub'], {}, 10);
 run('bash', [...provision, '--apply'], {}, 10);
 fs.chmodSync(legacy, 0o700); // Separate, explicit administrator permission change in synthetic lab only.
+const { faultStage, verifyReruns } = await import('./provision-scenarios.mjs');
+faultStage('users', provision);
 run('bash', [...provision, '--apply']);
 run('bash', [...provision, '--apply']);
+verifyReruns(provision);
 assert.equal(run('systemctl', ['show', 'mediacode', '-p', 'MainPID', '--value']), legacyPid);
 run('sshd', ['-t']);
 const policy = run('sshd', ['-T', '-C', 'user=deploy-stage,host=localhost,addr=127.0.0.1']);
@@ -148,7 +151,27 @@ function releaseState() {
     marker: fs.statSync(`${opt}/releases/${old}/.release-meta.json`).mtimeMs });
 }
 const beforeNoop = releaseState();
+await import('./health-scenarios.mjs');
 deploy(old, '', 0); assert.equal(health().commit, old); unchanged(); assert.equal(releaseState(), beforeNoop);
+for (const name of ['data', 'uploads']) for (const replacement of ['missing', 'file', 'directory', 'other', 'outside', 'relative']) {
+  const link = `${opt}/releases/${old}/${name}`, marker = fs.readFileSync(`${opt}/releases/${old}/.release-inventory.json`);
+  const activePid = run('systemctl', ['show', 'mediacode-prod', '-p', 'MainPID', '--value']);
+  fs.unlinkSync(link);
+  if (replacement === 'file') fs.writeFileSync(link, 'not runtime data');
+  if (replacement === 'directory') fs.mkdirSync(link);
+  if (replacement === 'other') fs.symlinkSync(`/var/lib/mediacode/staging/${name}`, link);
+  if (replacement === 'outside') fs.symlinkSync('/tmp', link);
+  if (replacement === 'relative') fs.symlinkSync(`../../../../var/lib/mediacode/production/${name}`, link);
+  deploy(old, '', 21); unchanged();
+  assert.equal(run('systemctl', ['show', 'mediacode-prod', '-p', 'MainPID', '--value']), activePid);
+  assert.deepEqual(fs.readFileSync(`${opt}/releases/${old}/.release-inventory.json`), marker);
+  if (replacement === 'directory') { assert.ok(fs.lstatSync(link).isDirectory()); fs.rmdirSync(link); }
+  else if (replacement !== 'missing') { assert.ok(fs.lstatSync(link)); fs.unlinkSync(link); }
+  else assert.equal(fs.existsSync(link), false);
+  fs.symlinkSync(`${data}/${name}`, link); // Explicit lab reset only, never deploy repair.
+}
+assert.equal(releaseState(), beforeNoop);
+console.log('PASS 12 real active-release external-link mutations: exit 21, preserve damage/inventory/PID/data; no target-data inventory reads');
 const entry = `${opt}/releases/${old}/dist/index.html`, originalEntry = fs.readFileSync(entry);
 fs.writeFileSync(entry, 'damaged synthetic artifact');
 const damaged = releaseState();
@@ -199,3 +222,5 @@ assert.equal(fs.realpathSync(`${opt}/previous`), `${opt}/releases/${old}`);
 console.log('PASS cleanup with keep=1 preserves both current and previous releases');
 console.log('PASS all VM fault scenarios; unrelated legacy service PID preserved');
 await import('./security-scenarios.mjs');
+const { verifyUnixAccess } = await import('./unix-access-scenarios.mjs');
+verifyUnixAccess(provision);

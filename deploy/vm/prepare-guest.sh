@@ -4,7 +4,7 @@ set -euo pipefail
 [[ "$(hostname)" = mediacode-vm-lab && "$(systemd-detect-virt)" = kvm ]] || exit 90
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl git sqlite3 build-essential python3 rsync sudo shellcheck xz-utils
+apt-get install -y --no-install-recommends ca-certificates curl git sqlite3 build-essential python3 rsync sudo shellcheck xz-utils acl
 cd /tmp
 curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt -o node-shasums
 node_archive=$(awk '$2 ~ /^node-v22\..*-linux-x64.tar.xz$/ {print $2}' node-shasums)

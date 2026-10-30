@@ -72,7 +72,7 @@ jobs:
       - name: Validate deployment shell syntax without executing provisioning
         run: |
           for script in deploy/*.sh deploy/vm/*.sh; do bash -n "$script"; done
-          python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("deploy").glob("*.py")]'
+          python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("deploy").rglob("*.py")]'
 
       - name: Build production frontend bundle
         run: npm run build

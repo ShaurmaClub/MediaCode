@@ -9,7 +9,7 @@ hostnamectl set-hostname mediacode-vm-lab
 touch /etc/mediacode-lab-vm
 ln -sf /usr/local/libexec/mediacode-node /usr/bin/node
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 openssh-server sudo
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 openssh-server sudo acl
 systemctl start ssh
 cd /srv/review
 echo "Real VM: Ubuntu $VERSION_ID; $(systemctl --version | head -n 1); PID1=$(cat /proc/1/comm)"
