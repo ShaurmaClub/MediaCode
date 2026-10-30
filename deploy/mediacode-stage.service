@@ -21,6 +21,7 @@ TimeoutStopSec=15
 
 # Безопасность процесса (Ubuntu 24.04 systemd hardening)
 NoNewPrivileges=true
+UMask=0077
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true

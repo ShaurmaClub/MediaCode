@@ -7,6 +7,8 @@
  */
 import fs from 'fs';
 import dotenv from 'dotenv';
+import Database from 'better-sqlite3';
+import { inspectSchemaState } from './config/schema.js';
 
 if (process.env.ENV_FILE && fs.existsSync(process.env.ENV_FILE)) {
   dotenv.config({ path: process.env.ENV_FILE, quiet: true });
@@ -14,7 +16,13 @@ if (process.env.ENV_FILE && fs.existsSync(process.env.ENV_FILE)) {
   dotenv.config({ quiet: true });
 }
 
-const { default: db, getSchemaState } = await import('./db.js');
+// Rollback inspection must not import db.js: importing it applies migrations.
+const rollbackCheck = process.argv.includes('--verify-rollback');
+const migrationModule = rollbackCheck ? null : await import('./db.js');
+const db = rollbackCheck
+  ? new Database(process.env.DB_PATH || './data/media.db', { readonly: true, fileMustExist: true })
+  : migrationModule.default;
+const getSchemaState = rollbackCheck ? inspectSchemaState : migrationModule.getSchemaState;
 
 try {
   const integrity = db.pragma('quick_check', { simple: true });
@@ -30,7 +38,7 @@ try {
   }
 
   // Принудительный checkpoint WAL, чтобы все изменения схемы были гарантированно сброшены на диск
-  db.pragma('wal_checkpoint(PASSIVE)');
+  if (!rollbackCheck) db.pragma('wal_checkpoint(PASSIVE)');
 
   console.log(
     `✅ [MIGRATE] Схема БД v${state.schemaVersion} (ожидалась v${state.expectedSchemaVersion}, миграций: ${state.migrationsCount}) совместима и проверена.`

@@ -17,6 +17,7 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/unix-access.sh"
 
 NON_INTERACTIVE=0
 SKIP_CERTBOT=0
@@ -61,6 +62,33 @@ err()  { printf '\033[1;31m[ ERROR ]\033[0m %s\n' "$*" >&2; }
 if [[ "${EUID}" -ne 0 ]]; then
   err "Запустите установщик с правами суперпользователя: sudo bash deploy/install.sh"
   exit 1
+fi
+
+# A clean installer must not take over an existing host by accident.
+if [[ -f /etc/systemd/system/mediacode.service || -d /srv/services/MediaCode || -f /etc/caddy/Caddyfile ]]; then
+  err 'Existing installation/proxy detected. Use inspect-legacy.sh and MIGRATE_EXISTING.md.'
+  exit 10
+fi
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy; then
+  err 'Caddy is active; existing HTTPS must be reviewed before installing Nginx.'
+  exit 10
+fi
+if [[ ! -f /opt/mediacode/production/current/.release-sha ]]; then
+  if ss -Hltn '( sport = :80 or sport = :443 )' 2>/dev/null | read -r _; then
+    err 'HTTP/HTTPS ports already occupied; review other sites before installation.'
+    exit 10
+  fi
+fi
+if [[ -d /etc/nginx/sites-enabled ]]; then
+  OTHER_CONFIGS=$(find /etc/nginx/sites-enabled -mindepth 1 -maxdepth 1 ! -name default ! -name mediacode-kaiton.conf | wc -l)
+  if [[ "$OTHER_CONFIGS" -gt 0 ]]; then
+    err 'Other Nginx sites exist; review shared-host ownership, names and TLS before installation.'
+    exit 10
+  fi
+fi
+if command -v docker >/dev/null 2>&1 && [[ -n "$(docker ps -q 2>/dev/null)" ]]; then
+  err 'Other Docker applications are running; use an approved shared-host migration plan.'
+  exit 10
 fi
 
 # ------------------------------------------------------------------------------
@@ -158,6 +186,7 @@ log "Обновление индексов APT и установка базов�
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y || { err "Ошибка apt-get update"; exit 1; }
 apt-get install -y \
+  acl \
   ca-certificates \
   curl \
   gnupg \
@@ -178,7 +207,7 @@ apt-get install -y \
 NEED_NODE=1
 if command -v node >/dev/null 2>&1; then
   CURRENT_NODE_MAJOR="$(node -v | sed 's/^v//' | cut -d. -f1)"
-  if [[ "${CURRENT_NODE_MAJOR}" -ge 20 ]]; then
+  if [[ "${CURRENT_NODE_MAJOR}" -eq 22 ]]; then
     ok "Node.js уже установлен: $(node -v)"
     NEED_NODE=0
   fi
@@ -217,12 +246,12 @@ ensure_contour_users() {
   fi
 
   if ! id -u "${deploy_user}" >/dev/null 2>&1; then
-    useradd --create-home --home-dir "/home/${deploy_user}" --shell /bin/bash -G "${runtime_user}" "${deploy_user}"
+    useradd --create-home --home-dir "/home/${deploy_user}" --shell /bin/bash "${deploy_user}"
     ok "Создан deploy-пользователь ${deploy_user}"
   else
-    usermod -a -G "${runtime_user}" "${deploy_user}" || true
     ok "Deploy-пользователь ${deploy_user} уже существует"
   fi
+  prepare_code_membership "$runtime_user" "$deploy_user" || exit 10
 
   mkdir -p "/home/${deploy_user}/.ssh"
   touch "/home/${deploy_user}/.ssh/authorized_keys"
@@ -234,22 +263,13 @@ ensure_contour_users() {
 ensure_contour_users "${PROD_RUNTIME_USER}" "${PROD_DEPLOY_USER}"
 ensure_contour_users "${STAGE_RUNTIME_USER}" "${STAGE_DEPLOY_USER}"
 
-# Строго разделённый sudoers: deploy-prod управляет ТОЛЬКО production, deploy-stage — ТОЛЬКО staging
-SUDOERS_FILE="/etc/sudoers.d/mediacode-deploy"
-cat > "${SUDOERS_FILE}" <<EOF
-Defaults:${PROD_DEPLOY_USER},${STAGE_DEPLOY_USER} !requiretty
-${PROD_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-prod.service, /bin/systemctl reload mediacode-prod.service, /bin/systemctl status mediacode-prod.service, /bin/systemctl is-active mediacode-prod.service
-${PROD_DEPLOY_USER} ALL=(${PROD_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
-${STAGE_DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl restart mediacode-stage.service, /bin/systemctl reload mediacode-stage.service, /bin/systemctl status mediacode-stage.service, /bin/systemctl is-active mediacode-stage.service
-${STAGE_DEPLOY_USER} ALL=(${STAGE_RUNTIME_USER}) NOPASSWD: /usr/bin/node, /usr/bin/env, /bin/test
-EOF
-chmod 440 "${SUDOERS_FILE}"
-visudo -cf "${SUDOERS_FILE}" >/dev/null || {
-  err "Ошибка проверки синтаксиса ${SUDOERS_FILE}"
-  rm -f "${SUDOERS_FILE}"
-  exit 1
-}
-ok "Настроены изолированные sudo-привилегии в ${SUDOERS_FILE}"
+# Do not reinstall the retired broad interpreter policy, even on a clean host.
+# Administrator prepares a frozen root-owned snapshot with built dependencies.
+if [ -n "${MEDIACODE_APPROVED_RUNTIME_SOURCE:-}" ]; then
+  /usr/bin/python3 -I "${SCRIPT_DIR}/install-runtime-ops.py" "$MEDIACODE_APPROVED_RUNTIME_SOURCE" || exit 10
+else
+  warn 'CD broker not installed: administrator must review/install runtime helpers separately. No broad sudo granted.'
+fi
 
 # ------------------------------------------------------------------------------
 # 6. Создание структуры каталогов релизов и постоянных данных
@@ -259,14 +279,13 @@ setup_contour_dirs() {
   local runtime_user="$2"
   local deploy_user="$3"
 
-  mkdir -p "${BASE_OPT_DIR}/${env_name}/releases"
-  mkdir -p "${BASE_OPT_DIR}/${env_name}/repo"
+  for dir in "${BASE_OPT_DIR}/${env_name}" "${BASE_OPT_DIR}/${env_name}/releases" "${BASE_OPT_DIR}/${env_name}/repo"; do prepare_code_directory "$dir" "$deploy_user" "$runtime_user" || return 10; done
+  audit_private_acl "${BASE_VAR_DIR}/${env_name}" || return 10
   mkdir -p "${BASE_VAR_DIR}/${env_name}/data"
   mkdir -p "${BASE_VAR_DIR}/${env_name}/uploads/recruitment"
   mkdir -p "${BASE_VAR_DIR}/${env_name}/backups"
 
-  # Код принадлежит deploy-<env>:mediacode-<env> (runtime имеет только чтение, другой контур не имеет доступа)
-  chown -R "${deploy_user}:${runtime_user}" "${BASE_OPT_DIR}/${env_name}"
+  # New code uses a dedicated code-only group; preserve legacy parent groups for live runtimes.
   chmod 750 "${BASE_OPT_DIR}/${env_name}"
   chmod 750 "${BASE_OPT_DIR}/${env_name}/releases"
 
@@ -354,6 +373,7 @@ bootstrap_initial_release() {
     ok "Контур ${env_name} уже имеет активный релиз: $(readlink -f "${current_link}")"
     return 0
   fi
+  [[ ! -e "${current_link}" && ! -L "${current_link}" ]] || { err 'Damaged current is preserved for administrator recovery'; return 1; }
 
   local init_sha="initial-$(date -u +%Y%m%d%H%M%S)"
   if [[ -d "${SOURCE_REPO_DIR}/.git" ]]; then
@@ -362,7 +382,7 @@ bootstrap_initial_release() {
   local release_dir="${env_root}/releases/${init_sha}"
 
   log "Подготовка первоначального релиза ${env_name} (${init_sha})..."
-  mkdir -p "${release_dir}"
+  mkdir "${release_dir}" || { err 'Existing release preserved; clean installer will not overwrite it'; return 1; }
 
   if [[ -f "${SOURCE_REPO_DIR}/package.json" && -f "${SOURCE_REPO_DIR}/server/index.js" ]]; then
     rsync -a \
@@ -391,7 +411,7 @@ bootstrap_initial_release() {
 }
 EOF
   printf '%s\n' "${init_sha}" > "${release_dir}/.release-sha"
-  chown -R "${deploy_user}:${runtime_user}" "${release_dir}"
+  chown -R "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${release_dir}"
 
   log "Установка зависимостей и сборка frontend для ${env_name}..."
   su - "${deploy_user}" -c "cd '${release_dir}' && npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev" || {
@@ -404,11 +424,11 @@ EOF
   ln -sfn "${BASE_VAR_DIR}/${env_name}/data" "${release_dir}/data"
   ln -sfn "${BASE_VAR_DIR}/${env_name}/uploads" "${release_dir}/uploads"
 
-  chown -R "${deploy_user}:${runtime_user}" "${release_dir}"
+  chown -R "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${release_dir}"
   chmod -R u=rwX,g=rX,o= "${release_dir}"
 
   # Проверка и применение миграций БД от имени изолированного runtime-пользователя
-  sudo -n -u "${runtime_user}" /usr/bin/env \
+  /usr/sbin/runuser -u "${runtime_user}" -- /usr/bin/env \
     NODE_ENV=production \
     ENV_FILE="${BASE_VAR_DIR}/${env_name}/.env" \
     DB_PATH="${BASE_VAR_DIR}/${env_name}/data/media.db" \
@@ -417,8 +437,10 @@ EOF
       return 1
     }
 
+  node "${SCRIPT_DIR}/release-integrity.mjs" --record "${release_dir}" || return 1
+  chown "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${release_dir}/.release-inventory.json"
   ln -sfn "${release_dir}" "${current_link}"
-  chown -h "${deploy_user}:${runtime_user}" "${current_link}"
+  chown -h "${deploy_user}:mediacode-code-${runtime_user#mediacode-}" "${current_link}"
   ok "Первоначальный релиз ${env_name} установлен: ${release_dir}"
 }
 

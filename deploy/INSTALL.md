@@ -1,5 +1,7 @@
 # Инструкция по первичной установке MediaCode (Ubuntu Server 24.04 LTS)
 
+Для **существующего** сайта, включая Vavilon, начать с [MIGRATE_EXISTING.md](MIGRATE_EXISTING.md) и [DEVOPS_QUICKSTART.md](DEVOPS_QUICKSTART.md). Этот clean installer нельзя запускать поверх действующих Caddy/MediaCode. CD отключён по умолчанию; подключение SSH само по себе не разрешает production-деплой.
+
 Данное руководство описывает полное развёртывание контуров **Production** (`kaiton.ru`) и **Staging** (`stage.kaiton.ru`) на чистом сервере **Ubuntu Server 24.04 LTS** и подключение автоматического CI/CD из GitHub Actions.
 
 ---

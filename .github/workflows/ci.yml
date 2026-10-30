@@ -2,7 +2,7 @@ name: MediaCode CI/CD (Ubuntu 24.04)
 
 on:
   push:
-    branches: [main, dev, "ci/**", "feat/**", "fix/**"]
+    branches: ['**']
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -69,6 +69,11 @@ jobs:
       - name: Run ESLint static analysis
         run: npm run lint
 
+      - name: Validate deployment shell syntax without executing provisioning
+        run: |
+          for script in deploy/*.sh deploy/vm/*.sh; do bash -n "$script"; done
+          python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("deploy").rglob("*.py")]'
+
       - name: Build production frontend bundle
         run: npm run build
 
@@ -129,13 +134,40 @@ jobs:
           SESSION_SECRET: ci-test-secret-key-minimum-32-characters-long
 
   # ============================================================================
-  # 4. АЛЕРТ ПРИ ПАДЕНИИ ТЕСТОВ / БЕЗОПАСНОСТИ (БЛОКИРОВКА ДЕПЛОЯ)
+  # 4. Actual ephemeral VM: no deploy secrets, OIDC, Tailscale or host connection.
   # ============================================================================
+  systemd-security:
+    name: Real Ubuntu 22.04 systemd and privilege security
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Freeze reviewed source and Node binary for the disposable VM only
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo install -d -m 755 /srv/review /usr/local/libexec
+          sudo install -o root -g root -m 755 "$(command -v node)" /usr/local/libexec/mediacode-node
+          tar --exclude=.git --exclude=.npm-cache --exclude=data --exclude=uploads -cf - . | sudo tar -xf - -C /srv/review
+          sudo chown -R root:root /srv/review
+          sudo cp -a .npm-cache /srv/review/.npm-cache
+      - name: Real sudoers, systemd, full synthetic staging and fault injection
+        run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted MEDIACODE_TEST_NODE_DIR="$(dirname "$(dirname "$(command -v node)")")" bash /srv/review/deploy/vm/prepare-ci.sh
+
   notify-ci-failure:
     name: "🚨 Alert on CI Failure"
     runs-on: ubuntu-24.04
-    needs: [security-and-packages, lint-and-build, tests]
-    if: always() && (needs.security-and-packages.result != 'success' || needs.lint-and-build.result != 'success' || needs.tests.result != 'success')
+    needs: [security-and-packages, lint-and-build, tests, systemd-security]
+    if: always() && (needs.security-and-packages.result != 'success' || needs.lint-and-build.result != 'success' || needs.tests.result != 'success' || needs.systemd-security.result != 'success')
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -164,8 +196,11 @@ jobs:
   deploy-staging:
     name: "🚀 Deploy to Staging (stage.kaiton.ru)"
     runs-on: ubuntu-24.04
-    needs: [security-and-packages, lint-and-build, tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [security-and-packages, lint-and-build, tests, systemd-security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && vars.CD_STAGING_ENABLED == 'true'
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: deploy-staging-environment
       cancel-in-progress: false
@@ -187,17 +222,32 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy-stage' }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/staging' }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-stage' }}
+          EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
+          REQUIRE_TAILSCALE: '1'
+          DEPLOY_ENV: staging
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
         run: |
-          missing=()
-          [ -z "${SSH_HOST}" ] && missing+=("SSH_HOST")
-          [ -z "${SSH_PRIVATE_KEY}" ] && missing+=("SSH_PRIVATE_KEY")
-          [ -z "${SSH_KNOWN_HOSTS}" ] && missing+=("SSH_KNOWN_HOSTS")
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "❌ CRITICAL: В GitHub Environment 'staging' отсутствуют обязательные секреты: ${missing[*]}" >&2
-            echo "Запустите помощник настройки: bash deploy/setup-github.sh --host <IP_СЕРВЕРА>" >&2
-            echo "Подробная инструкция: deploy/INSTALL.md" >&2
-            exit 1
-          fi
+          bash deploy/validate-secrets.sh
+
+      - name: Join staging tailnet using OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:mediacode-ci-stage
+          ping: ${{ secrets.SSH_HOST }}
+
+      - name: Verify staging tailnet identity and private peer route
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          EXPECTED_TS_TAG: tag:mediacode-ci-stage
+        run: node deploy/tailnet-check.mjs
 
       - name: Release-based Deploy to Staging (Ubuntu 24.04)
         id: deploy
@@ -216,6 +266,9 @@ jobs:
         run: |
           set +e
           umask 077
+          [ -n "${SSH_TARGET_IP:-}" ] || exit 10
+          SCP_TARGET="${SSH_TARGET_IP}"
+          [[ "$SCP_TARGET" != *:* ]] || SCP_TARGET="[$SCP_TARGET]"
           mkdir -p ~/.ssh
           printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_deploy
           printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
@@ -223,11 +276,13 @@ jobs:
 
           REMOTE_ARCHIVE="/tmp/mediacode-dist-${TARGET_SHA}.tar.gz"
           scp -i ~/.ssh/id_deploy -P "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            dist.tar.gz "${SSH_USER}@${SSH_HOST}:${REMOTE_ARCHIVE}"
+            dist.tar.gz "${SSH_USER}@${SCP_TARGET}:${REMOTE_ARCHIVE}"
           SCP_CODE=$?
           if [ "${SCP_CODE}" -ne 0 ]; then
             echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
@@ -237,11 +292,13 @@ jobs:
           fi
 
           ssh -i ~/.ssh/id_deploy -p "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            "${SSH_USER}@${SSH_HOST}" \
+            "${SSH_USER}@${SSH_TARGET_IP}" \
             "DEPLOY_ENV='staging' TARGET_SHA='${TARGET_SHA}' DEPLOY_PATH='${DEPLOY_PATH}' DATA_ROOT='${DATA_ROOT}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' EXTERNAL_HEALTH_URL='${EXTERNAL_HEALTH_URL}' DIST_ARCHIVE='${REMOTE_ARCHIVE}' bash -s" < deploy/remote-deploy.sh
           DEPLOY_CODE=$?
           rm -f ~/.ssh/id_deploy
@@ -283,14 +340,22 @@ jobs:
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
 
+      - name: Leave ephemeral staging node
+        if: always()
+        run: |
+          if command -v tailscale >/dev/null 2>&1; then sudo -n tailscale logout; fi
+
   # ============================================================================
   # 6. АВТОДЕПЛОЙ НА PRODUCTION (ветка main -> kaiton.ru)
   # ============================================================================
   deploy-production:
     name: "🚀 Deploy to Production (kaiton.ru)"
     runs-on: ubuntu-24.04
-    needs: [security-and-packages, lint-and-build, tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [security-and-packages, lint-and-build, tests, systemd-security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CD_PRODUCTION_ENABLED == 'true'
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: deploy-production-environment
       cancel-in-progress: false
@@ -312,17 +377,32 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy-prod' }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/mediacode/production' }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mediacode-prod' }}
+          EXTERNAL_HEALTH_URL: ${{ secrets.HEALTHCHECK_URL || '' }}
+          REQUIRE_TAILSCALE: '1'
+          DEPLOY_ENV: production
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
         run: |
-          missing=()
-          [ -z "${SSH_HOST}" ] && missing+=("SSH_HOST")
-          [ -z "${SSH_PRIVATE_KEY}" ] && missing+=("SSH_PRIVATE_KEY")
-          [ -z "${SSH_KNOWN_HOSTS}" ] && missing+=("SSH_KNOWN_HOSTS")
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "❌ CRITICAL: В GitHub Environment 'production' отсутствуют обязательные секреты: ${missing[*]}" >&2
-            echo "Запустите помощник настройки: bash deploy/setup-github.sh --host <IP_СЕРВЕРА>" >&2
-            echo "Подробная инструкция: deploy/INSTALL.md" >&2
-            exit 1
-          fi
+          bash deploy/validate-secrets.sh
+
+      - name: Join production tailnet using OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:mediacode-ci-prod
+          ping: ${{ secrets.SSH_HOST }}
+
+      - name: Verify production tailnet identity and private peer route
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          EXPECTED_TS_TAG: tag:mediacode-ci-prod
+        run: node deploy/tailnet-check.mjs
 
       - name: Release-based Deploy to Production (Ubuntu 24.04)
         id: deploy
@@ -341,6 +421,9 @@ jobs:
         run: |
           set +e
           umask 077
+          [ -n "${SSH_TARGET_IP:-}" ] || exit 10
+          SCP_TARGET="${SSH_TARGET_IP}"
+          [[ "$SCP_TARGET" != *:* ]] || SCP_TARGET="[$SCP_TARGET]"
           mkdir -p ~/.ssh
           printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_deploy
           printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
@@ -348,11 +431,13 @@ jobs:
 
           REMOTE_ARCHIVE="/tmp/mediacode-dist-${TARGET_SHA}.tar.gz"
           scp -i ~/.ssh/id_deploy -P "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            dist.tar.gz "${SSH_USER}@${SSH_HOST}:${REMOTE_ARCHIVE}"
+            dist.tar.gz "${SSH_USER}@${SCP_TARGET}:${REMOTE_ARCHIVE}"
           SCP_CODE=$?
           if [ "${SCP_CODE}" -ne 0 ]; then
             echo "event_type=cd-failure" >> "${GITHUB_OUTPUT}"
@@ -362,11 +447,13 @@ jobs:
           fi
 
           ssh -i ~/.ssh/id_deploy -p "${SSH_PORT}" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="${SSH_HOST}" \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=15 \
-            "${SSH_USER}@${SSH_HOST}" \
+            "${SSH_USER}@${SSH_TARGET_IP}" \
             "DEPLOY_ENV='production' TARGET_SHA='${TARGET_SHA}' DEPLOY_PATH='${DEPLOY_PATH}' DATA_ROOT='${DATA_ROOT}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_URL='${HEALTH_URL}' EXTERNAL_HEALTH_URL='${EXTERNAL_HEALTH_URL}' DIST_ARCHIVE='${REMOTE_ARCHIVE}' bash -s" < deploy/remote-deploy.sh
           DEPLOY_CODE=$?
           rm -f ~/.ssh/id_deploy
@@ -407,3 +494,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+
+      - name: Leave ephemeral production node
+        if: always()
+        run: |
+          if command -v tailscale >/dev/null 2>&1; then sudo -n tailscale logout; fi

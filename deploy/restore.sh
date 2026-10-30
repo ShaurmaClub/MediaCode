@@ -14,9 +14,13 @@
 set -u
 set -o pipefail
 
+# Destructive restore is an administrator operation, not a deploy capability.
+[[ "$EUID" = 0 ]] || { echo 'Administrator-only restore: deploy sudo does not grant data restore.' >&2; exit 10; }
+
 RESTORE_ENV="production"
 BACKUP_SPEC="latest"
 MODE=""
+ALLOW_NO_SAFETY_BACKUP=0
 BASE_OPT_DIR="${BASE_OPT_DIR:-/opt/mediacode}"
 BASE_DATA_DIR="${BASE_DATA_DIR:-/var/lib/mediacode}"
 
@@ -29,7 +33,8 @@ while [ $# -gt 0 ]; do
     --list) MODE="list"; shift ;;
     --test-restore|--dry-run) MODE="test"; shift ;;
     --confirm) MODE="confirm"; shift ;;
-    *) shift ;;
+    --allow-no-safety-backup) ALLOW_NO_SAFETY_BACKUP=1; shift ;;
+    *) echo "Unknown option: $1" >&2; exit 10 ;;
   esac
 done
 
@@ -61,7 +66,7 @@ BACKUP_DIR="${BACKUP_DIR:-${STATE_DIR}/backups}"
 UPLOAD_DIR="${UPLOAD_DIR:-${STATE_DIR}/uploads/recruitment}"
 
 run_as_runtime() {
-  if [ "${RUN_AS_CURRENT_USER:-0}" = "1" ] || [ "$(id -un)" = "$RUNTIME_USER" ] || ! id -u "$RUNTIME_USER" >/dev/null 2>&1; then
+  if [ "${RUN_AS_CURRENT_USER:-0}" = "1" ] || [ "$(id -un)" = "$RUNTIME_USER" ]; then
     /usr/bin/env \
       ENV_FILE="$ENV_FILE" \
       DB_PATH="$DB_PATH" \
@@ -70,7 +75,7 @@ run_as_runtime() {
       UPLOADS_DIR="$UPLOAD_DIR" \
       "$@"
   else
-    sudo -n -u "$RUNTIME_USER" /usr/bin/env \
+    /usr/sbin/runuser -u "$RUNTIME_USER" -- /usr/bin/env \
       ENV_FILE="$ENV_FILE" \
       DB_PATH="$DB_PATH" \
       BACKUP_DIR="$BACKUP_DIR" \
@@ -116,12 +121,19 @@ echo "🔍 Шаг 1/6: Проверка целостности и совмест
 if run_as_runtime /bin/test -f "$DB_PATH"; then
   echo "💾 Шаг 2/6: Создание страховочной копии текущего состояния перед перезаписью..."
   (cd "$CURRENT_DIR" && run_as_runtime /usr/bin/node server/backup.js --with-uploads --reason=pre-restore) || {
-    echo "⚠️ Предупреждение: не удалось создать страховочную копию текущей БД, продолжаем восстановление..."
+    if [ "$ALLOW_NO_SAFETY_BACKUP" != 1 ]; then
+      echo 'Safety backup failed; restore blocked before stopping the service (code 20).' >&2
+      echo 'Only with separate administrator approval: --allow-no-safety-backup' >&2
+      exit 20
+    fi
+    echo 'WARNING: explicit --allow-no-safety-backup override; current data may be unrecoverable.' >&2
   }
 fi
 
 # 3. Остановка записи данных (остановка systemd-сервиса и проверка отсутствия активного процесса)
 echo "🛑 Шаг 3/6: Остановка сервиса ${SERVICE_NAME}..."
+command -v systemctl >/dev/null 2>&1 || { echo 'No service controller; restore blocked.' >&2; exit 10; }
+systemctl cat "${SERVICE_NAME}.service" >/dev/null 2>&1 || { echo 'Expected service not installed; restore blocked.' >&2; exit 10; }
 if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "${SERVICE_NAME}.service" >/dev/null 2>&1; then
   systemctl stop "$SERVICE_NAME" || sudo -n systemctl stop "$SERVICE_NAME" || {
     echo "❌ Не удалось остановить сервис ${SERVICE_NAME}!"
