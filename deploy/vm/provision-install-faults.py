@@ -1,6 +1,7 @@
 #!/usr/bin/python3 -I
 """Root administrator test: fail two atomic publishes and retry on real VM."""
 import importlib.util
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -16,6 +17,7 @@ sys.argv = [source + '/deploy/install-runtime-ops.py', source]
 for target in ('/usr/local/sbin/mediacode-ops', '/etc/sudoers.d/mediacode-deploy'):
     original = os.replace
     hits = []
+    before = hashlib.sha256(Path(target).read_bytes()).digest()
 
     def injected(src, dst):
         if str(dst) == target:
@@ -31,6 +33,8 @@ for target in ('/usr/local/sbin/mediacode-ops', '/etc/sudoers.d/mediacode-deploy
         else:
             raise AssertionError('publication fault not observed')
     assert hits == [target]
+    assert hashlib.sha256(Path(target).read_bytes()).digest() == before
+    assert Path(target).stat().st_uid == 0 and not Path(target).stat().st_mode & 0o022
     subprocess.run(['/usr/sbin/visudo', '-c'], check=True, stdout=subprocess.DEVNULL)
     installer.main()
 print('PASS 2 real helper/broker/sudoers publication faults and safe retries')

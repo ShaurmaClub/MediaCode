@@ -21,6 +21,45 @@
 
 ## Новая модель
 
+### Unix-группы и прямой файловый доступ (final review)
+
+Членство deploy в runtime-группе не нужно: deploy владеет кодом и публикует его
+с группой `mediacode-code-prod` / `mediacode-code-stage`. В code-группу входят только
+соответствующие deploy и runtime. Provisioning и clean installer удаляют только
+устаревшее supplementary membership deploy в `mediacode-prod` / `mediacode-stage`.
+Чужие неожиданные группы provisioning не исправляет молча, а блокирует apply.
+
+Одинаковая матрица для обоих контуров; «чужой» означает соседний Environment:
+
+| Объект | root | свой deploy | свой runtime | чужие deploy/runtime |
+| --- | --- | --- | --- | --- |
+| Код/release 0750, файлы 0640/0750, deploy:code-group | RW | RW, publisher | R/X, без W | нет |
+| `.env`, DB/WAL/SHM, uploads files, backups files 0600 runtime:runtime | RW | нет прямого доступа | RW | нет |
+| State root 0700 runtime:runtime | RWX | нет traversal | RWX | нет traversal |
+| Data/uploads/backups subdirs 0750 или строже | RWX | нет traversal через state root | RWX | нет |
+| `current`/`previous` symlink | admin | переключение внутри своего code root | readlink/traversal, без замены | нет traversal |
+| Prepare temporary dir 0700, файлы 0600 до publish | admin | RW | нет до публикации | нет |
+| Broker/helpers/sshd/sudoers/unit | admin RW | только fixed broker API | только read/execute где разрешено | без W |
+
+Права 0777 самого symlink не дают доступ к закрытому target: проверяются права
+родителей и target. Extended/default ACL на state root, env, DB/WAL/SHM и data/uploads/
+backups roots блокируют provisioning **до изменений** и требуют ручного review.
+Это не обещание автоматического аудита каждого вложенного произвольного upload:
+граница прямого deploy-доступа — закрытый state root. Новые файлы runtime/broker
+создаются с umask 0077; ACL и метаданные конкретных synthetic файлов проверяет VM.
+
+При upgrade старые code parents и releases с runtime-группой сохраняются:
+deploy остаётся их владельцем, runtime читает через свою primary group, уже живой
+процесс не теряет доступ из-за cached supplementary groups. Новые releases получают
+code-group; systemd при штатном старте получает актуальные группы из NSS. Provisioning
+не перезапускает приложение. После изменения membership открыть новую deploy SSH-сессию
+перед сборкой/публикацией; удаление группы из NSS не отзывает её у старой сессии.
+State root 0700 сохраняет запрет прямого чтения даже у старой deploy-сессии.
+Не делать рекурсивный chgrp/chmod существующего current ради этой миграции.
+
+Эта матрица описывает **прямой filesystem access**, не изоляцию от собственного
+приложения: publisher может выполнить свой код как собственный runtime (см. ниже).
+
 Система хранит `/usr/local/sbin/mediacode-ops` (root:root 0755), helpers в
 `/usr/local/lib/mediacode-ops/{production,staging}` и отдельный root-owned Node binary
 `/usr/local/libexec/mediacode-node`. Родительские каталоги root-owned и не доступны
@@ -122,6 +161,18 @@ Provisioning не транзакционный: частичная ошибка 
 accounts/directories/helpers, но не выдаёт broad sudo и не переключает приложение.
 После ошибки сохранить лог, проверить состояние и выполнить review до повторного apply.
 
+Каждый отказ сообщает `phase=...` и exit code. Candidate sshd проходит `sshd -t`,
+а effective policy для root/no1se/runner/ubuntu сравнивается до/после до установки.
+Scoped Match касается только deploy; для нового include явно устанавливается `Match all`.
+Перед заменой SSH files сохраняются приватные copies; при обычной shell-ошибке на
+установке/validation/reload исходные файлы возвращаются, проходят `sshd -t` и reload.
+Если rollback/reload сам не удался, держать admin session/console открытой и исправить
+конфиг вручную; успешный автоматический возврат не заменяет проверку второго входа.
+SIGKILL/потеря питания не покрываются EXIT trap. Не удалять частично созданные users
+или state: проверить метаданные, `visudo -c`, `sshd -t`, независимый admin login,
+устранить причину и повторить тот же approved apply. Broker/sudoers публикуются
+атомарно после candidate validation, root-only `.next` не даёт временных grants.
+
 ## Повтор SHA и повреждение
 
 Релиз получает `.release-inventory.json` только в новом staging-каталоге. Inventory
@@ -129,6 +180,18 @@ accounts/directories/helpers, но не выдаёт broad sudo и не пере
 полное содержимое и типы; code symlinks не могут выходить из release root. Это детектор
 повреждения, **не подпись** от злонамеренного владельца release: deploy может менять
 и код, и inventory. Авторство/review обеспечивает GitHub, не JSON manifest.
+
+Корневые `data` и `uploads` не пропускаются без проверки: обязательны именно symlink
+с точной абсолютной целью `/var/lib/mediacode/{production|staging}/{data|uploads}`
+своего Environment. В inventory записаны тип и текст цели; содержимое target не
+читается и не stat'ится. Missing/file/directory/foreign/outside/relative replacements
+блокируются, в том числе после создания inventory. Релизы со старым форматом inventory
+не переписываются: они fail closed при reuse; нужен новый approved release/recovery.
+
+Active-SHA health-check уже использовал `pipefail`: refused/timeout/HTTP error/empty/
+invalid JSON/wrong commit и curl error после валидного JSON дают exit 21, не успех.
+Успешная семантика no-op не менялась; отдельная loopback HTTP VM-fixture проверяет
+все семь отказов с сохранением PID, inventory, links, backups и synthetic business data.
 
 - Active healthy SHA + inventory/policy/readiness → 0, без backup, restart, link/content changes.
 - Active damaged/unhealthy SHA → 21 с диагностикой; даже если старый process ещё жив,

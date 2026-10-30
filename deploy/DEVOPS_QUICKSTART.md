@@ -87,6 +87,20 @@ bash deploy/setup-github.sh --host HOST --port 22 \
 
 ## 4. Старый сервер: read-only → пробная миграция
 
+Final security review: `deploy` больше не входит в runtime-группу. Код публикуется
+с отдельной `mediacode-code-prod/stage`; после одобренного provisioning нужна **новая
+deploy SSH-сессия** для актуальных групп. Existing code parents/releases сохраняют
+старую runtime-группу ради уже работающего процесса; приложение не перезапускается.
+Не применять recursive chgrp к current. Матрица прав и ACL gates — в
+[SECURITY_MODEL.md](SECURITY_MODEL.md). На существующем host нужен пакет `acl` для
+`getfacl`; установка prerequisites — отдельная административная операция.
+
+При provisioning error записать `phase`/exit code и сохранить admin session/console.
+Не удалять частичные users/state. Сверить SSH files с private backup, выполнить
+`sshd -t` / `visudo -c`, проверить независимый admin login, устранить причину и повторить
+approved apply. Обычная ошибка SSH publish/reload возвращает исходные config files;
+при неудаче rollback нужна console/manual recovery. Полный порядок — Security Model.
+
 Полные команды в `MIGRATE_EXISTING.md`. Сначала `inspect-legacy.sh`, затем `migrate-existing.sh --dry-run`. Разработку и npm ci запускать в отдельном review-каталоге, не в `/srv/services/MediaCode`.
 
 `--apply` создаёт только приватные копии. Сохранить SESSION_SECRET. Проверить WAL-backup, uploads, manifests и пробную схему. Выгрузить bundle в зашифрованное внешнее хранилище и реально восстановить оттуда. Для публичного staging использовать только синтетические/обезличенные данные.

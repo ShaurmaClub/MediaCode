@@ -12,6 +12,7 @@ case "$cmd:$fault" in
   install:keys) [[ "$target" != /etc/ssh/mediacode-keys/deploy-prod ]] || fail_once;;
   install:ssh-files) [[ "$target" != /etc/ssh/mediacode-deploy.conf ]] || fail_once;;
   sshd:ssh-validation) [[ " $* " != *' -f '* ]] || fail_once;;
+  sshd:ssh-installed) [[ "$*" != '-t' ]] || fail_once;;
   systemctl:ssh-reload) [[ "$*" != 'reload ssh.service' ]] || fail_once;;
 esac
 case "$cmd" in useradd|usermod|sshd) exec "/usr/sbin/$cmd" "$@";; *) exec "/usr/bin/$cmd" "$@";; esac

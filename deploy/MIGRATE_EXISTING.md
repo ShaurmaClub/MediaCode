@@ -101,6 +101,34 @@ sha256sum /private/offsite-restore-test/home/no1se/mediacode-migration-private/T
 
 ## 6. Откат
 
+### Unix membership / partial provisioning (final security review)
+
+До любого будущего согласованного apply сохранить private metadata/users/groups/ACL,
+sshd main/include и sudoers; держать действующий admin SSH и резервную console.
+Для `getfacl` нужен `acl`. Named/default ACL в protected data paths требует review:
+скрипт прекращает работу, а не стирает ACL автоматически. Не публиковать env/DB/ключи
+или вывод с персональными данными в CI.
+
+Deploy удаляется из supplementary runtime group и вместе с runtime получает отдельную
+code-only group. Старые parents/releases с runtime group не меняются рекурсивно:
+это сохраняет чтение уже живому runtime без скрытого restart. Новые releases —
+deploy:code-group. Открыть новую deploy-сессию до публикации; проверить `id`, прямые
+запреты own/cross `.env`, DB/WAL/SHM, uploads/backups, runtime чтение кода и fixed broker.
+Не считать эту модель изоляцией от своего application publisher.
+
+При отказе provisioning сохранить `phase=...`/exit code; existing application units и
+current не переключаются. Проверить фактические accounts/groups/directories/helpers
+и owner/mode/ACL, не удалять runtime/state и не возвращать broad sudo. При обычной
+ошибке SSH activation скрипт восстанавливает исходные config files и reload после
+`sshd -t`; проверить второй admin login до закрытия первого. Если возврат не удался
+или процесс был убит SIGKILL, восстановить reviewed private SSH copies с console,
+проверить `sshd -t`, затем reload и login; sudoers — `visudo -c` до установки.
+Устранить причину и повторить тот же approved apply, не «чинить» current inplace.
+
+Inventory теперь включает точные ссылки `data/uploads`, но никогда пользовательские
+файлы target. Старый inventory не обновлять на активном SHA: при fail-closed 21
+сохранить релиз и выбрать новый approved SHA/recovery вне current/previous.
+
 Внутри новой release-структуры `remote-deploy.sh` откатывает **код** на previous без перезаписи БД/uploads, предварительно проверяя схему read-only. При несовместимости код 31, ручное решение. `migrate.js --verify-rollback` не импортирует модуль с миграциями.
 
 При первом переносе до открытия пользовательской записи: остановить новый unit, проверить целостность untouched legacy, вернуть старый unit/проверенный proxy. Не запускать два unit на одном порту. После открытия записи сначала согласовать обработку изменений, появившихся в новом контуре: возвращение к legacy-снимку их не содержит.

@@ -32,12 +32,18 @@ export function verifyReruns(provision) {
   run('install', ['-d', '-m', '700', '-o', 'vm-admin', '-g', 'vm-admin', '/home/vm-admin/.ssh']);
   run('install', ['-m', '600', '-o', 'vm-admin', '-g', 'vm-admin', '/tmp/vm-keys/admin.pub', '/home/vm-admin/.ssh/authorized_keys']);
   fs.writeFileSync('/tmp/vm-keys/hosts', `vm-review.local ${fs.readFileSync('/etc/ssh/ssh_host_ed25519_key.pub', 'utf8')}`, { mode: 0o600 });
-  const adminLogin = () => assert.equal(run('ssh', ['-F', '/dev/null', '-i', '/tmp/vm-keys/admin', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'HostKeyAlias=vm-review.local', '-o', 'UserKnownHostsFile=/tmp/vm-keys/hosts', 'vm-admin@127.0.0.1', 'id', '-un']), 'vm-admin');
+  // sshd briefly re-execs after HUP; systemctl reload completes before listen() returns.
+  // Bounded connection retry accommodates that real reload, never authentication failures.
+  const adminLogin = () => {
+    run('/bin/systemctl', ['is-active', 'ssh']);
+    assert.equal(run('ssh', ['-F', '/dev/null', '-i', '/tmp/vm-keys/admin', '-o', 'ConnectionAttempts=3', '-o', 'ConnectTimeout=5', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'HostKeyAlias=vm-review.local', '-o', 'UserKnownHostsFile=/tmp/vm-keys/hosts', 'vm-admin@127.0.0.1', 'id', '-un']), 'vm-admin');
+  };
   adminLogin();
-  for (const phase of ['groups', 'directories', 'keys', 'ssh-validation', 'ssh-files', 'ssh-reload']) {
+  for (const phase of ['groups', 'directories', 'keys', 'ssh-validation', 'ssh-files', 'ssh-installed', 'ssh-reload']) {
     faultStage(phase, provision); adminLogin();
     run('bash', [...provision, '--apply']); adminLogin();
+    console.log(`PASS provisioning ${phase}: failed safely, original SSH files preserved, retry and administrator login succeed`);
   }
   run('/usr/bin/python3', ['-I', 'deploy/vm/provision-install-faults.py']); adminLogin();
-  console.log('PASS 9 partial provisioning faults: users/groups/dirs/keys/broker/sudoers/sshd/reload; admin SSH and retries verified');
+  console.log('PASS 10 partial provisioning faults: users/groups/dirs/keys/broker/sudoers/sshd/reload; admin SSH and retries verified');
 }

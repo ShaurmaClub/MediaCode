@@ -1,5 +1,38 @@
 # PR #5: Security Hardening & Safe Deployment — результаты
 
+## Final security review — 30.10.2026
+
+Исходная проверенная точка: `1bdbf05`,
+[baseline CI 40887330430](https://github.com/ShaurmaClub/MediaCode/actions/runs/40887330430).
+Ниже старые результаты относятся к baseline, не заменяют проверку новых изменений.
+
+| Замечание | Решение | Новые доказательства |
+| --- | --- | --- |
+| P1 Unix groups | Избыточное membership подтверждено и удалено в provisioning/installer; отдельные code groups, upgrade существующих users без restart | Real own/cross env/DB/WAL/SHM/uploads/backups denials, metadata/ACL matrix, legacy membership retry при живом PID, fresh staging |
+| P1 data/uploads inventory | Пропуск ссылок подтверждён и исправлен; точный type/absolute target своего Environment, без чтения target | 12 замен в unit и 12 в настоящем active release, exit 21 без ремонта, прежний PID/data/inventory |
+| P2 partial provisioning | Усилено: phase diagnostics, config prevalidation/effective admin policy, SSH rollback на обычную ошибку, safe retry/manual recovery | 10 faults: users/groups/dirs/keys/broker/sudoers/SSH candidate/publish/validation/reload; настоящий admin SSH после отказов/повторов |
+| P2 active-SHA health | Ошибка fail-open не подтвердилась: existing `pipefail` корректен; менять успешный путь не нужно | 7 реальных HTTP/curl отказов, включая валидный JSON + truncated transfer; каждый exit 21, без restart/backup/link/data updates |
+
+Перечень новых/изменённых implementation/test файлов: `unix-access.sh`, `install.sh`,
+`provision-vavilon.sh`, `release-integrity.mjs`, `remote-deploy.sh`,
+`vm/{prepare-ci.sh,prepare-guest.sh,scenarios.mjs,unix-access-scenarios.mjs,
+health-scenarios.mjs,health-fixture.py,provision-scenarios.mjs,provision-fault.sh,
+provision-install-faults.py}`, `tests/release-hardening.test.js`, `.github/workflows/ci.yml`.
+Обновлены SECURITY_MODEL, этот отчёт, DEVOPS_QUICKSTART и MIGRATE_EXISTING.
+Broker и service units менять не потребовалось: их UID/GID drop/umask/sandbox сохранены.
+
+Итоговая Unix-матрица и точные migration/recovery ограничения приведены в
+[SECURITY_MODEL.md](SECURITY_MODEL.md#unix-группы-и-прямой-файловый-доступ-final-review).
+Полная проверка новой реализации выполняется в PR checks; final verdict будет
+зафиксирован после завершения Linux/systemd CI. Локально Bash/Python/Node syntax PASS;
+Windows symlink fixture получает EPERM, Linux tests не пропускаются и не ослабляются.
+
+Ограничения: deploy по-прежнему контролирует собственный runtime через код; cached
+groups требуют новой SSH-сессии; старый inventory fail closed без inplace upgrade;
+SIGKILL/power loss и отказ SSH rollback требуют console/manual recovery. Никаких
+подключений к Vavilon, production изменений, merge, изменений Environments/Secrets/
+Variables/ACL/OIDC или включения CD в этой задаче не выполнялось.
+
 29.10.2026. Только ветка `fix/safe-legacy-migration-20261027`, без merge #4/#5,
 применения на Vavilon и включения CD. Все новые данные/ключи в испытаниях синтетические.
 
