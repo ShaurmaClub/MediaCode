@@ -126,7 +126,13 @@ db.function('u_match', { deterministic: true, varargs: true }, (query, ...fields
 
 import { DEPARTMENTS } from './config/departments.js';
 import { RECRUITMENT_TRACKS } from './config/recruitmentTracks.js';
-export { DEPARTMENTS, RECRUITMENT_TRACKS };
+import {
+  SCHEMA_VERSION,
+  MIN_COMPATIBLE_SCHEMA_VERSION,
+  ORDERED_MIGRATIONS,
+  inspectSchemaState,
+} from './config/schema.js';
+export { DEPARTMENTS, RECRUITMENT_TRACKS, SCHEMA_VERSION, MIN_COMPATIBLE_SCHEMA_VERSION };
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -495,16 +501,39 @@ db.exec(`
   );
 `);
 
-try {
-  db.prepare('SELECT activation_token FROM users LIMIT 1').get();
-} catch(e) {
-  db.exec('ALTER TABLE users ADD COLUMN activation_token TEXT;');
-}
+ensureColumn('users', 'activation_token', 'TEXT');
+ensureColumn('recruitment_applications', 'admin_resubmission_allowed', 'INTEGER DEFAULT 0');
 
-try {
-  db.prepare('SELECT admin_resubmission_allowed FROM recruitment_applications LIMIT 1').get();
-} catch(e) {
-  db.exec('ALTER TABLE recruitment_applications ADD COLUMN admin_resubmission_allowed INTEGER DEFAULT 0;');
+// ==========================================
+// SCHEMA VERSIONING & MIGRATION LEDGER
+// ==========================================
+db.exec(`
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    backward_compatible INTEGER NOT NULL DEFAULT 1,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+const applyVersionLedger = db.transaction(() => {
+  const insMigration = db.prepare(`
+    INSERT INTO schema_migrations (version, name, backward_compatible)
+    VALUES (?, ?, ?)
+    ON CONFLICT(version) DO NOTHING
+  `);
+  for (const m of ORDERED_MIGRATIONS) {
+    insMigration.run(m.version, m.name, m.backwardCompatible);
+  }
+  const currentPragma = Number(db.pragma('user_version', { simple: true }) || 0);
+  if (currentPragma < SCHEMA_VERSION) {
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  }
+});
+applyVersionLedger();
+
+export function getSchemaState(targetDb = db) {
+  return inspectSchemaState(targetDb);
 }
 // END MIGRATIONS BLOCK
 

@@ -59,10 +59,15 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Внутренняя ошибка сервера', details: isProduction ? undefined : err.message });
 });
 
-const PORT = process.env.PORT || 4000;
-export const server = app.listen(PORT, () => {
-  console.log(`Media Center backend is running on http://localhost:${PORT}`);
-});
+const PORT = Number(process.env.PORT || 4000);
+const HOST = process.env.HOST || (isProduction ? '127.0.0.1' : undefined);
+export const server = HOST
+  ? app.listen(PORT, HOST, () => {
+      console.log(`Media Center backend is running on http://${HOST}:${PORT}`);
+    })
+  : app.listen(PORT, () => {
+      console.log(`Media Center backend is running on http://localhost:${PORT}`);
+    });
 
 startAutoBackup(db);
 

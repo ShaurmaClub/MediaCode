@@ -1,0 +1,70 @@
+name: Manual tailnet and OpenSSH connectivity (no deployment)
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Approved Environment (dev for staging, main for production)
+        required: true
+        type: choice
+        options: [staging, production]
+      claims_only:
+        description: Inspect selected OIDC claims only; no tailnet or SSH connection
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  check:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      ((inputs.environment == 'staging' && github.ref == 'refs/heads/dev') ||
+       (inputs.environment == 'production' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: 22
+      - name: Inspect allowlisted OIDC claims without publishing JWT
+        run: node deploy/oidc-claims.mjs
+      - name: Validate Environment secrets
+        if: ${{ !inputs.claims_only }}
+        env:
+          REQUIRE_TAILSCALE: '1'
+          DEPLOY_PATH: /opt/mediacode/${{ inputs.environment }}
+          SERVICE_NAME: ${{ inputs.environment == 'production' && 'mediacode-prod' || 'mediacode-stage' }}
+        run: bash deploy/validate-secrets.sh
+      - name: Join ephemeral tailnet identity using OIDC
+        if: ${{ !inputs.claims_only }}
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: ${{ inputs.environment == 'production' && 'tag:mediacode-ci-prod' || 'tag:mediacode-ci-stage' }}
+          ping: ${{ secrets.SSH_HOST }}
+      - name: Verify private identity and reachability
+        if: ${{ !inputs.claims_only }}
+        env:
+          EXPECTED_TS_TAG: ${{ inputs.environment == 'production' && 'tag:mediacode-ci-prod' || 'tag:mediacode-ci-stage' }}
+        run: node deploy/tailnet-check.mjs
+      - name: OpenSSH identity and negative access checks (id only)
+        if: ${{ !inputs.claims_only }}
+        run: bash deploy/ssh-connectivity.sh
+      - name: Leave ephemeral runner
+        if: always()
+        run: |
+          if command -v tailscale >/dev/null 2>&1; then sudo -n tailscale logout; fi

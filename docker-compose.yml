@@ -1,0 +1,32 @@
+services:
+  mediacode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${CONTAINER_NAME:-mediacode-app}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DB_PATH: /app/data/media.db
+      AUTO_BACKUP: "1"
+      BACKUP_DIR: /app/data/backups
+      BACKUP_KEEP: "14"
+    ports:
+      - "127.0.0.1:${HOST_PORT:-4000}:4000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"

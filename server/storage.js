@@ -3,8 +3,12 @@ import fs from 'fs';
 import crypto from 'crypto';
 import multer from 'multer';
 
-const uploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads', 'recruitment');
-fs.mkdirSync(uploadDir, { recursive: true });
+function resolveUploadDir() {
+  const dir = process.env.UPLOAD_DIR || process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads', 'recruitment');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+resolveUploadDir();
 
 const MAX_SIZE_MB = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '50', 10);
 const MAX_FILE_SIZE = MAX_SIZE_MB * 1024 * 1024;
@@ -24,7 +28,7 @@ const ALLOWED_EXTENSIONS = new Set([
 
 const storageEngine = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    cb(null, resolveUploadDir());
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -90,7 +94,7 @@ export function hasValidSignature(filePath, originalName) {
  */
 export const storageService = {
   getUploadDir() {
-    return uploadDir;
+    return resolveUploadDir();
   },
 
   getMaxSizeBytes() {
@@ -102,9 +106,10 @@ export const storageService = {
   },
 
   getSafeFilePath(storedName) {
-    const safePath = path.resolve(uploadDir, storedName);
+    const activeUploadDir = resolveUploadDir();
+    const safePath = path.resolve(activeUploadDir, storedName);
     // Path traversal check
-    const relative = path.relative(path.resolve(uploadDir), safePath);
+    const relative = path.relative(path.resolve(activeUploadDir), safePath);
     if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
       throw new Error('Недопустимый путь к файлу');
     }
@@ -113,7 +118,8 @@ export const storageService = {
 
   /** True if every uploaded multer file really looks like its declared type. */
   filesHaveValidContent(files) {
-    return files.every((f) => hasValidSignature(path.join(uploadDir, f.filename), f.originalname));
+    const activeUploadDir = resolveUploadDir();
+    return files.every((f) => hasValidSignature(path.join(activeUploadDir, f.filename), f.originalname));
   },
 
   deleteFile(storedName) {
