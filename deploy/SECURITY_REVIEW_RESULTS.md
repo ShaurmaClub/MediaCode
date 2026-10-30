@@ -23,9 +23,21 @@ Broker и service units менять не потребовалось: их UID/G
 
 Итоговая Unix-матрица и точные migration/recovery ограничения приведены в
 [SECURITY_MODEL.md](SECURITY_MODEL.md#unix-группы-и-прямой-файловый-доступ-final-review).
-Полная проверка новой реализации выполняется в PR checks; final verdict будет
-зафиксирован после завершения Linux/systemd CI. Локально Bash/Python/Node syntax PASS;
+Источник полного CI именно финального HEAD — [PR #5 checks](https://github.com/ShaurmaClub/MediaCode/pull/5/checks).
+Обязательные проверки: 72 unit/integration, 8 E2E, 49 privilege negatives, 42 Unix
+access denials, 12 external-link mutations, 7 health faults, 10 provisioning faults,
+live group upgrade, data/code ACL rejection, прежний recovery matrix и fresh staging.
+Локально Bash/Python/Node syntax PASS;
 Windows symlink fixture получает EPERM, Linux tests не пропускаются и не ослабляются.
+
+VM fixture явно нормализует inherited runner ACL только внутри synthetic roots/frozen
+input и исправляет mode собственного runner sudoers на 0440 без изменения правил.
+После этого full `visudo -c` и no-ACL assertions обязательны. Отдельно инъецируются
+неожиданные ACL state/code roots: production scripts обязаны отказать, сохранить ACL
+для ручного review и не перезапустить приложение. Они не удаляют ACL автоматически.
+Старое runtime membership само по себе не обходило state root 0700: это проверяется
+прямыми отказами чтения env/DB до удаления membership. Исправлена избыточная привилегия,
+а не заявлена доказанная утечка старых секретов.
 
 Ограничения: deploy по-прежнему контролирует собственный runtime через код; cached
 groups требуют новой SSH-сессии; старый inventory fail closed без inplace upgrade;
@@ -33,7 +45,10 @@ SIGKILL/power loss и отказ SSH rollback требуют console/manual reco
 подключений к Vavilon, production изменений, merge, изменений Environments/Secrets/
 Variables/ACL/OIDC или включения CD в этой задаче не выполнялось.
 
-29.10.2026. Только ветка `fix/safe-legacy-migration-20261027`, без merge #4/#5,
+## Архив предыдущего раунда — 29.10.2026
+
+Следующие CI counts и SSH timeouts — исторические, не действия final review 30.10.
+Только ветка `fix/safe-legacy-migration-20261027`, без merge #4/#5,
 применения на Vavilon и включения CD. Все новые данные/ключи в испытаниях синтетические.
 
 ## Подтверждено и исправлено

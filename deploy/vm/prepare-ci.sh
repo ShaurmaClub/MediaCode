@@ -17,6 +17,11 @@ if [[ -e /etc/sudoers.d/runner ]]; then
   chmod 0440 /etc/sudoers.d/runner
 fi
 visudo -c >/dev/null
+# The hosted image/workspace carries runner/default ACLs. Explicitly normalize
+# only these disposable synthetic roots and frozen test input, never a host path.
+install -d -m 755 -o root -g root /opt/mediacode /var/lib/mediacode
+setfacl -b -k -- /opt/mediacode /var/lib/mediacode
+setfacl -R -b -k -- /srv/review
 systemctl start ssh
 cd /srv/review
 echo "Real VM: Ubuntu $VERSION_ID; $(systemctl --version | head -n 1); PID1=$(cat /proc/1/comm)"

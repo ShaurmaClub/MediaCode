@@ -28,6 +28,8 @@
 соответствующие deploy и runtime. Provisioning и clean installer удаляют только
 устаревшее supplementary membership deploy в `mediacode-prod` / `mediacode-stage`.
 Чужие неожиданные группы provisioning не исправляет молча, а блокирует apply.
+Само старое membership не доказывало утечку: state root 0700 и private files 0600
+уже закрывали прямое чтение в проверенной модели. Удаление группы — least-privilege hardening.
 
 Одинаковая матрица для обоих контуров; «чужой» означает соседний Environment:
 
@@ -44,6 +46,8 @@
 Права 0777 самого symlink не дают доступ к закрытому target: проверяются права
 родителей и target. Extended/default ACL на state root, env, DB/WAL/SHM и data/uploads/
 backups roots блокируют provisioning **до изменений** и требуют ручного review.
+На existing code roots ACL проверяется до chmod/install; у новых roots также
+проверяется результат наследования ACL. Неожиданный ACL блокирует apply, а не стирается.
 Это не обещание автоматического аудита каждого вложенного произвольного upload:
 граница прямого deploy-доступа — закрытый state root. Новые файлы runtime/broker
 создаются с umask 0077; ACL и метаданные конкретных synthetic файлов проверяет VM.
@@ -59,6 +63,8 @@ State root 0700 сохраняет запрет прямого чтения да
 
 Эта матрица описывает **прямой filesystem access**, не изоляцию от собственного
 приложения: publisher может выполнить свой код как собственный runtime (см. ниже).
+
+### Ограниченный broker
 
 Система хранит `/usr/local/sbin/mediacode-ops` (root:root 0755), helpers в
 `/usr/local/lib/mediacode-ops/{production,staging}` и отдельный root-owned Node binary

@@ -63,6 +63,8 @@ export function verifyUnixAccess(provision) {
   for (const [contour, suffix] of [['production', 'prod'], ['staging', 'stage']]) {
     run('usermod', ['-a', '-G', `mediacode-${suffix}`, `deploy-${suffix}`]);
     for (const name of ['', '/releases', '/repo']) run('chgrp', [`mediacode-${suffix}`, `/opt/mediacode/${contour}${name}`]);
+    // Legacy membership alone did not bypass the existing 0700 state-root barrier.
+    for (const file of ['.env', 'data/media.db']) as(`deploy-${suffix}`, ['cat', `/var/lib/mediacode/${contour}/${file}`], 1);
   }
   run('bash', [...provision, '--apply']);
   assert.equal(pid(), beforePid); assert.equal(fs.readlinkSync('/opt/mediacode/production/current'), beforeCurrent);
@@ -76,5 +78,11 @@ export function verifyUnixAccess(provision) {
   run('bash', [...provision, '--apply'], 10);
   assert.equal(run('getfacl', ['-cp', state]), acl); assert.equal(pid(), beforePid);
   run('setfacl', ['-b', state]); fs.chmodSync(state, 0o700); // Explicit lab reset, never deployment repair.
+  const codeRoot = '/opt/mediacode/production';
+  run('setfacl', ['-m', 'u:vm-admin:r-x', codeRoot]);
+  const codeAcl = run('getfacl', ['-cp', codeRoot]);
+  run('bash', [...provision, '--apply'], 10);
+  assert.equal(run('getfacl', ['-cp', codeRoot]), codeAcl); assert.equal(pid(), beforePid);
+  run('setfacl', ['-b', codeRoot]); fs.chmodSync(codeRoot, 0o750); // Explicit fixture reset only.
   console.log(`PASS ${denials} Unix access denials, real DB/WAL/SHM/backups, ACL/modes, legacy group upgrade without runtime restart; fresh staging uses code group`);
 }
