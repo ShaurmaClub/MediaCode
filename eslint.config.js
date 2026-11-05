@@ -7,7 +7,7 @@ export default [
     ignores: ['dist/**', 'node_modules/**', 'scratch_test_files/**', 'Proverka/**', 'test-results/**']
   },
   {
-    files: ['src/**/*.{js,jsx}', 'tests/**/*.{js,jsx}', 'server/**/*.{js,jsx}', '*.js'],
+    files: ['src/**/*.{js,jsx}', 'tests/**/*.{js,jsx}', 'server/**/*.{js,jsx}', 'deploy/**/*.mjs', '*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

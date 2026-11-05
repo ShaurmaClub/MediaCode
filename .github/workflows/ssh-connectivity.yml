@@ -1,0 +1,72 @@
+name: Manual staging connectivity (no deployment)
+on:
+  workflow_dispatch:
+    inputs:
+      claims_only:
+        description: Inspect trust claims only (no tailnet or SSH)
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEPLOY_ENV: staging
+      TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: '22'
+      EXPECTED_TS_TAG: tag:mediacode-ci-stage
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: 22
+      - run: node deploy/oidc-claims.mjs
+      - name: Check staging connection inputs without logging values
+        if: ${{ !inputs.claims_only }}
+        env:
+          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          CLIENT: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+        run: |
+          test "$SSH_HOST" = '100.81.97.45'
+          test -n "$KEY" && test -n "$HOSTS" && test -n "$CLIENT"
+      - if: ${{ !inputs.claims_only }}
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4 verified 2026-11-05
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:mediacode-ci-stage
+      - if: ${{ !inputs.claims_only }}
+        run: node deploy/tailnet-check.mjs
+      - name: Pinned OpenSSH id only as deploy-stage (no SCP or commands from input)
+        if: ${{ !inputs.claims_only }}
+        env:
+          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -f "$ssh_dir/key" "$ssh_dir/hosts"; rmdir "$ssh_dir"' EXIT
+          printf '%s\n' "$KEY" > "$ssh_dir/key"
+          printf '%s\n' "$HOSTS" > "$ssh_dir/hosts"
+          ssh-keygen -y -P '' -f "$ssh_dir/key" >/dev/null
+          ssh-keygen -F "$SSH_HOST" -f "$ssh_dir/hosts" >/dev/null
+          result=$(ssh -i "$ssh_dir/key" -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o HostKeyAlias="$SSH_HOST" \
+            -o UserKnownHostsFile="$ssh_dir/hosts" -o ConnectTimeout=15 \
+            "deploy-stage@$SSH_TARGET_IP" 'id -un')
+          test "$result" = deploy-stage
+      - name: Leave ephemeral CI node
+        if: always() && !inputs.claims_only
+        run: if command -v tailscale >/dev/null; then sudo -n tailscale logout; fi

@@ -49,6 +49,7 @@ if (isProduction && !process.env.SESSION_SECRET) {
 }
 
 app.use(session({
+  name: process.env.APP_ENV === 'staging' ? 'mediacode.stage.sid' : 'connect.sid',
   store: new SQLiteSessionStore(),
   secret: process.env.SESSION_SECRET || 'dev-only-secret',
   resave: false,
@@ -334,6 +335,18 @@ export function transliterateToLogin(fullName) {
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
+
+// Staging-only readiness: exercise the actual DB and identify the deployed commit.
+if (process.env.APP_ENV === 'staging') {
+  app.get('/api/health/ready', (req, res) => {
+    try {
+      db.prepare('SELECT 1').get();
+      res.json({ ok: true, db: 'ok', environment: 'staging', commit: process.env.APP_COMMIT });
+    } catch {
+      res.status(503).json({ ok: false, environment: 'staging' });
+    }
+  });
+}
 
 app.post('/api/auth/login', authIpLimiter, authLimiter, (req, res) => {
   const { login, password } = req.body || {};
@@ -2681,7 +2694,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-export const server = app.listen(PORT, () => {
+export const server = app.listen(PORT, process.env.HOST || undefined, () => {
   console.log(`Media Center backend is running on http://localhost:${PORT}`);
 });
 

@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .npm-cache/
+__pycache__/
 
 # Production build
 dist/
