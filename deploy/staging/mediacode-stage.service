@@ -1,0 +1,30 @@
+[Unit]
+Description=MediaCode minimal staging (production is a different unit)
+After=network.target
+
+[Service]
+Type=simple
+User=mediacode-stage
+Group=mediacode-stage
+SupplementaryGroups=mediacode-code-stage
+WorkingDirectory=/opt/mediacode/staging/current
+EnvironmentFile=/var/lib/mediacode/staging/.env
+ExecStart=/usr/bin/node /opt/mediacode/staging/current/deploy/staging/start.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/mediacode/staging/data /var/lib/mediacode/staging/uploads
+InaccessiblePaths=/srv/services/MediaCode
+MemoryMax=512M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+# Append only after approval, DNS and local readiness; never replace production.
+stage.kaiton.ru {
+    header X-Robots-Tag "noindex, nofollow, noarchive"
+    basic_auth {
+        stage-review REPLACE_WITH_CADDY_HASH
+    }
+    reverse_proxy 127.0.0.1:4001
+}

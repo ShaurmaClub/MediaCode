@@ -1,0 +1,48 @@
+name: Minimal staging CI (build only, no deployment)
+on:
+  push:
+    branches: ['dev', 'phase2/**']
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: staging-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: python3 -m unittest discover -s tests -p staging_archive_test.py
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - name: Package only reviewed code and build, never env/data/uploads/dependencies
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > .release-sha
+          tar -czf mediacode-staging.tar.gz package.json package-lock.json server dist deploy/staging .release-sha
+          sha256sum mediacode-staging.tar.gz > mediacode-staging.tar.gz.sha256
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        with:
+          name: staging-${{ github.sha }}
+          path: |
+            mediacode-staging.tar.gz
+            mediacode-staging.tar.gz.sha256
+          retention-days: 7
+          if-no-files-found: error
+# Intentionally no deployment job, environment secrets, OIDC or network access.
+# Both CD flags remain false. First deployment is owner-operated after approval.
